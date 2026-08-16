@@ -50,8 +50,9 @@ Owner 已於 2026-08-03 批准 [`G0-A-fixed-window-certified-dates`](evidence/m3
 |---|---|---|---|
 | M3.0 進場凍結 | `complete` | 記錄來源、程式與受保護資料指紋；驗證 M2 archive；確認 shadow 邊界 | [M3 entry baseline](evidence/m3-entry-baseline-2026-08-03.md) |
 | M3.1 契約與來源映射 | `complete` | G0 已批准；完成資料表、時間語意、availability、衝突規則與 source-to-table map | [PIT warehouse contract](contracts/pit-warehouse-contract.md)、[G0 決定](evidence/m3-g0-owner-decision-2026-08-03.md)、[source-to-table map 與 policy](contracts/m3-source-to-table-map.md)、[M3.1 完成證據](evidence/m3-1-coverage-ledger-and-durable-archival-2026-08-16.md) |
-| M3.1b 歷史抓取程式 | `pending` | 擴充抓取工具支援 TPEx 與任意 target 集；抓取固定期間 TWSE／TPEx 日價；建立 TEJ licensed-vendor lane 匯入 | [Owner 決定與抓取可行性](evidence/m3-owner-decisions-and-capture-feasibility-2026-08-16.md) |
-| M3.2 Append-only staging | `pending` | 從通過 gate 的 observation 建立 lineage 完整的 staging；同輸入重建結果一致 | 阻擋已於 2026-08-16 解除；需 M3.1b 先產出資料 |
+| M3.1b 歷史抓取程式 | `complete` | 擴充抓取工具支援 TPEx 與任意日期範圍；抓取固定期間 TWSE／TPEx 日價；建立 TEJ licensed-vendor 匯入通道 | [M3.1b 完成證據](evidence/m3-1b-window-capture-2026-08-16.md)：1,160/1,160 零錯誤、耐久封存 tree `a07a4b5b…`、ledger v2 `unknown` 歸零 |
+| M3.1c TEJ 匯入 | `pending` | 匯入交易日曆、上市下市歷史、財報申報日 | 待 Owner 提供 TEJ 匯出檔；規格見 [TEJ 匯入規格](contracts/tej-import-spec.md) |
+| M3.2 Append-only staging | `pending` | 從通過 gate 的 observation 建立 lineage 完整的 staging；同輸入重建結果一致 | 已有 764 個交易日的日價輸入可用 |
 | M3.3 日曆與證券生命週期 | `pending` | 建立交易日狀態、上市／下市／更名／市場移轉與 `security_instance_id` | golden-date membership tests |
 | M3.4 每日股價與公司行動 | `pending` | 保留 `ohlc_state`、activity scope、公告／觀測時間及修訂；禁止推補 OHLC | price/action PIT tests |
 | M3.5 市場狀態與財報 | `pending` | 納入停牌、處置、變更交易及 revision-safe 財報；缺覆蓋保持 unknown | cutoff/revision tests |
@@ -138,14 +139,30 @@ reconstruct(as_of_session, decision_as_of, markets, security_types, dataset_id)
 
 **新發現的阻擋**：`holidaySchedule` 端點只回傳當年度，**2025 年官方行事曆已永久無法取得**，改由 TEJ 供應。
 
-### M3.1b 工程範圍
+### M3.1b 已完成（2026-08-16）
 
-1. 擴充 `m2_daily_price_shadow`：目前僅支援 TWSE（程式碼明確拒絕非 `TWSE-PRICE-HIST` 來源），且 target 集以 SHA-256 與筆數釘死在 96-session 修復集。需支援 TPEx 與任意 target 集。
-2. 保存兩市場對非交易日的不同回應（TWSE 拋無資料錯誤、TPEx 回零列）為 evidence，不得以重試掩蓋。
-3. 建立 TEJ 匯入器與 licensed-vendor lane。
-4. 建立年度行事曆例行擷取，避免 2027 年重蹈覆轍。
+1,160/1,160 market-date 全部取得明確官方結果，零錯誤，18 分鐘完成。764 個交易日、396 個非交易日。Coverage ledger `unknown` 由 1,140 降為 **0**。詳見 [M3.1b 完成證據](evidence/m3-1b-window-capture-2026-08-16.md)。
 
-抓取規模：580 日 × 2 市場 = 1,160 次請求，預估 1 至 2 小時。
+兩項實證發現：
+
+- **兩市場交易日完全一致**（382 對 382，零分歧），D2 的共用行事曆政策得到實證支持；
+- **2026-07-10 兩市場休市但不在官方年度行事曆中**，證實禁止推算交易日曆的規定是必要的。
+
+### `supported` 仍為 0 的精確原因
+
+| 阻擋資料族 | 影響 market-date | 解法 |
+|---|---:|---|
+| `market_status=current-only` | 764 | **無任何已批准來源** ⛔ |
+| `security_lifecycle=current-only` | 764 | TEJ 上市下市歷史（已批准，待匯入）|
+| `fundamental=partial` | 764 | TEJ 財報申報日（已批准，待匯入）|
+| `corporate_action=unknown` | 763 | 官方除權息歷史逐日抓取 |
+
+### 待辦
+
+1. **需 Owner 決定**：歷史市場狀態（停牌／處置／注意／變更交易）從哪裡取得。現有 9 個來源全為 current-only，TEJ 已確認的模組不含此項。這是 M3 exit 的首要阻擋項。
+2. M3.1c：取得 TEJ 匯出檔後匯入三個模組。
+3. 擴充抓取工具涵蓋官方除權息歷史。
+4. 建立年度行事曆例行擷取，避免 2027 年重蹈 2025 年覆轍。
 
 M3.2 啟動後仍不得使用舊 `ScreenerStore` 的 replace／overwrite 路徑。抓到資料**不等於**該日期成為 `supported`，仍須通過完整資料族 coverage 檢查。
 

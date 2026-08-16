@@ -61,6 +61,8 @@ AlphaMaster 不得直接寫入正式策略、紙上帳本或真實委託；AI �
 - [M3.1 Source-to-Table Map、Availability 與 Conflict Policy](docs/contracts/m3-source-to-table-map.md)
 - [M3.1 完成證據：耐久封存與 coverage ledger](docs/evidence/m3-1-coverage-ledger-and-durable-archival-2026-08-16.md)
 - [M3 Owner 決定 D1–D5 與抓取可行性驗證](docs/evidence/m3-owner-decisions-and-capture-feasibility-2026-08-16.md)
+- [TEJ PRO 匯入規格](docs/contracts/tej-import-spec.md)
+- [M3.1b 完成證據：固定期間全量抓取與 ledger v2](docs/evidence/m3-1b-window-capture-2026-08-16.md)
 
 ## 已凍結的 M0 基線
 
@@ -92,17 +94,28 @@ M3.0 進場凍結與 M3.1 契約與來源映射皆已 `complete`；M3.2 起為 `
 
 G0 已於 2026-08-03 批准：固定基準期間為 2025-01-01 至 2026-08-03，TWSE 與 TPEx 分開逐日認證。只有 coverage certificate 明確標為 `supported` 的 market-date 受到承諾；未列、`partial`、`blocked` 或 `unknown` 一律拒絕使用。
 
-2026-08-16 已建立符合 G0 粒度的 1,160 列 coverage ledger，結果為：
+2026-08-16 依 Owner 決定 D1 完成固定期間全量抓取：1,160/1,160 個 market-date 零錯誤，764 個交易日、396 個非交易日，18 分鐘完成，正式 stores 未變動。
 
-| State | TWSE | TPEx | 合計 |
-|---|---:|---:|---:|
-| `supported` | 0 | 0 | **0** |
-| `not-session` | 17 | 0 | 17 |
-| `partial` | 2 | 1 | 3 |
-| `unknown` | 561 | 579 | 1,140 |
+Coverage ledger 前後對照：
 
-固定期間內耐久日價 session 只有 TWSE 2026-07-02、2026-07-31 與 TPEx 2026-07-31；2025 全年沒有任何官方歷史證據；TPEx 完全沒有交易日曆來源。96-session TWSE 修復 shadow 已耐久封存（primary 與 E: backup 逐檔雜湊一致、96/96 blob 重驗通過），但它僅含 TWSE 且只有 1 個 session 落在固定期間內。
+| State | v1（抓取前）| v2（抓取後）|
+|---|---:|---:|
+| `supported` | 0 | 0 |
+| `not-session` | 17 | **396** |
+| `partial` | 3 | **764** |
+| `unknown` | 1,140 | **0** |
 
-因此 M3 exit **無法**在取得新的歷史官方資料前達成，尚缺 1,143 個 market-date。下一步需要 Owner 決定歷史抓取程式、TPEx 日曆來源、證券生命週期歷史來源，或以新的 G0 版本調整固定期間。詳見 [M3.1 完成證據](docs/evidence/m3-1-coverage-ledger-and-durable-archival-2026-08-16.md)。
+**`unknown` 歸零**——固定期間內每一個 market-date 現在都有官方證據支撐。
 
-所有 M3 產物仍必須落在獨立 shadow；缺資料保持 `unknown` 或 `blocked`，不得用今日狀態、事後修訂或 legacy 資料補成歷史真相。2026-08-04 以後不會因「到今天」而自動加入支援範圍。
+兩項實證發現：兩市場交易日**完全一致**（382 對 382，零分歧），支持 D2 的共用行事曆政策；**2026-07-10 兩市場休市但不在官方年度行事曆中**，證實禁止推算交易日曆的規定是必要的。
+
+`supported` 仍為 0，阻擋原因已由「沒有資料」轉為四個特定資料族：
+
+| 阻擋資料族 | 影響 | 解法 |
+|---|---:|---|
+| `market_status` current-only | 764 | **無任何已批准來源** ⛔ |
+| `security_lifecycle` current-only | 764 | TEJ 上市下市歷史（已批准，待匯入）|
+| `fundamental` partial | 764 | TEJ 財報申報日（已批准，待匯入）|
+| `corporate_action` unknown | 763 | 官方除權息歷史抓取 |
+
+詳見 [M3.1b 完成證據](docs/evidence/m3-1b-window-capture-2026-08-16.md)。所有 M3 產物仍必須落在獨立 shadow；缺資料保持 `unknown` 或 `blocked`，不得用今日狀態、事後修訂或 legacy 資料補成歷史真相。

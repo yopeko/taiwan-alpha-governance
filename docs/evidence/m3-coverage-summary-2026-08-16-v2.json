@@ -1,0 +1,50 @@
+{
+  "certificate_id": "tw-alpha-m3-coverage-ledger-20260816-02",
+  "generated_at": "2026-08-16T13:15:51.510691+00:00",
+  "inputs": {
+    "m2_dailyprice96": "C:\\project\\tw-sepa-screener\\data\\raw_v2\\m2_dailyprice96_2026-08-03",
+    "m2_main": "C:\\project\\tw-sepa-screener\\data\\raw_v2\\m2_2026-08-03",
+    "m3_window_capture": "C:\\project\\tw-sepa-screener\\data\\raw_v2\\m3_window_2025-01-01_2026-08-03"
+  },
+  "ledger_path": "C:\\project\\tw-sepa-screener\\data\\raw_v2\\m3_coverage_ledger_2026-08-16-v2\\coverage_ledger.csv",
+  "ledger_sha256": "97f7d3cd28af6d7515ee6a805831d8939f52a4af3fff43420cc295fcbbf50b1f",
+  "markets": [
+    "TWSE",
+    "TPEX"
+  ],
+  "partial_blocking_families": {
+    "corporate_action=unknown": 763,
+    "fundamental=partial": 764,
+    "market_status=current-only": 764,
+    "security_lifecycle=current-only": 764
+  },
+  "reconstruction_state_counts": {
+    "not-session": 396,
+    "partial": 764
+  },
+  "reconstruction_state_counts_by_market": {
+    "TPEX": {
+      "not-session": 198,
+      "partial": 382
+    },
+    "TWSE": {
+      "not-session": 198,
+      "partial": 382
+    }
+  },
+  "remaining_gaps": [
+    "security_lifecycle is a current-only snapshot for every date; TEJ listing history is the approved fill and is not yet imported.",
+    "market_status is current-only for every date and has no approved historical source at all — this is now the single largest gap.",
+    "corporate_action has dated coverage for one date only.",
+    "fundamental coverage is limited to 2026-06 revenue and 2026Q1; TEJ announcement dates are the approved fill and are not yet imported."
+  ],
+  "row_count": 1160,
+  "schema_id": "tw-alpha-pit-coverage-certificate/1.0.0",
+  "status": "gap-ledger-only-not-a-supported-date-certificate",
+  "supersedes": "tw-alpha-m3-coverage-ledger-20260816-01",
+  "window": {
+    "calendar_dates": 580,
+    "end": "2026-08-03",
+    "start": "2025-01-01"
+  }
+}
