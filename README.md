@@ -9,7 +9,7 @@
 | M0 證據與市場契約 | complete | 2026-08-02 | [M0 專案契約](docs/m0-project-contract.md) |
 | M1 架構與重用稽核 | complete | 2026-08-02 | [M1 架構與重用稽核](docs/m1-architecture-reuse-audit.md) |
 | M2 官方不可變原始資料 | complete | 2026-08-03 | 36 sources、56 live observations、55 initial accepted + 1 released quarantine、0 unresolved；正式封存與 E: 備份均通過稽核。[M2 closure evidence](docs/evidence/m2-owner-approvals-release-and-durable-audit-2026-08-03.md) |
-| M3 Point-in-time warehouse | in progress（M3.2 起 blocked）| - | M3.0／M3.1 complete。1,160 列 coverage ledger 顯示 `supported`＝0、缺 1,143 個 market-date；M3.2 需 Owner 決定。[M3 計畫](docs/m3-point-in-time-warehouse-plan.md)、[M3.1 證據](docs/evidence/m3-1-coverage-ledger-and-durable-archival-2026-08-16.md) |
+| M3 Point-in-time warehouse | in progress | - | M3.0／M3.1 complete。Owner 已於 2026-08-16 批准 D1–D5，抓取阻擋解除；下一步 M3.1b 歷史抓取。[M3 計畫](docs/m3-point-in-time-warehouse-plan.md)、[M3.1 證據](docs/evidence/m3-1-coverage-ledger-and-durable-archival-2026-08-16.md)、[Owner 決定](docs/evidence/m3-owner-decisions-and-capture-feasibility-2026-08-16.md) |
 
 詳細狀態及退出門檻見 [里程碑登錄表](docs/milestone-register.md)。
 
@@ -60,6 +60,7 @@ AlphaMaster 不得直接寫入正式策略、紙上帳本或真實委託；AI �
 - [M3 G0 Owner 決定](docs/evidence/m3-g0-owner-decision-2026-08-03.md)
 - [M3.1 Source-to-Table Map、Availability 與 Conflict Policy](docs/contracts/m3-source-to-table-map.md)
 - [M3.1 完成證據：耐久封存與 coverage ledger](docs/evidence/m3-1-coverage-ledger-and-durable-archival-2026-08-16.md)
+- [M3 Owner 決定 D1–D5 與抓取可行性驗證](docs/evidence/m3-owner-decisions-and-capture-feasibility-2026-08-16.md)
 
 ## 已凍結的 M0 基線
 

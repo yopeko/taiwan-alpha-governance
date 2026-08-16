@@ -5,7 +5,7 @@
 | 欄位 | 值 |
 |---|---|
 | Plan ID | `tw-alpha-m3-plan-v0.3.0` |
-| 狀態 | `in_progress`（`blocked-on-owner-decision`）|
+| 狀態 | `in_progress` |
 | 進場日期 | 2026-08-03 |
 | 前置里程碑 | M0、M1、M2 `complete` |
 | 本階段輸出 | 獨立、可回復、不可覆寫正式資料的 point-in-time shadow warehouse |
@@ -50,7 +50,8 @@ Owner 已於 2026-08-03 批准 [`G0-A-fixed-window-certified-dates`](evidence/m3
 |---|---|---|---|
 | M3.0 進場凍結 | `complete` | 記錄來源、程式與受保護資料指紋；驗證 M2 archive；確認 shadow 邊界 | [M3 entry baseline](evidence/m3-entry-baseline-2026-08-03.md) |
 | M3.1 契約與來源映射 | `complete` | G0 已批准；完成資料表、時間語意、availability、衝突規則與 source-to-table map | [PIT warehouse contract](contracts/pit-warehouse-contract.md)、[G0 決定](evidence/m3-g0-owner-decision-2026-08-03.md)、[source-to-table map 與 policy](contracts/m3-source-to-table-map.md)、[M3.1 完成證據](evidence/m3-1-coverage-ledger-and-durable-archival-2026-08-16.md) |
-| M3.2 Append-only staging | `blocked` | 從通過 gate 的 observation 建立 lineage 完整的 staging；同輸入重建結果一致 | 阻擋原因：固定期間內只有 3 個 market-date 有耐久 session 級觀測，建 staging 無有意義輸入。需 Owner 先決定歷史抓取程式或調整 G0 期間 |
+| M3.1b 歷史抓取程式 | `pending` | 擴充抓取工具支援 TPEx 與任意 target 集；抓取固定期間 TWSE／TPEx 日價；建立 TEJ licensed-vendor lane 匯入 | [Owner 決定與抓取可行性](evidence/m3-owner-decisions-and-capture-feasibility-2026-08-16.md) |
+| M3.2 Append-only staging | `pending` | 從通過 gate 的 observation 建立 lineage 完整的 staging；同輸入重建結果一致 | 阻擋已於 2026-08-16 解除；需 M3.1b 先產出資料 |
 | M3.3 日曆與證券生命週期 | `pending` | 建立交易日狀態、上市／下市／更名／市場移轉與 `security_instance_id` | golden-date membership tests |
 | M3.4 每日股價與公司行動 | `pending` | 保留 `ohlc_state`、activity scope、公告／觀測時間及修訂；禁止推補 OHLC | price/action PIT tests |
 | M3.5 市場狀態與財報 | `pending` | 納入停牌、處置、變更交易及 revision-safe 財報；缺覆蓋保持 unknown | cutoff/revision tests |
@@ -121,14 +122,30 @@ reconstruct(as_of_session, decision_as_of, markets, security_types, dataset_id)
 3. ~~建立固定期間的 market-date coverage ledger~~ → **完成**。1,160 列；`supported`＝0、`not-session`＝17、`partial`＝3、`unknown`＝1,140。
 4. M3.2 append-only staging → **阻擋**。固定期間內只有 3 個 market-date 有耐久 session 級觀測，現在建 staging 只會產生空殼。
 
-### 需要 Owner 決定才能繼續
+### Owner 決定已於 2026-08-16 取得
 
-M3 目前不是「還沒做」，而是「缺輸入資料」。下一步必須先取得下列決定之一或多項：
+五項決定全文見 [Owner 決定與抓取可行性](evidence/m3-owner-decisions-and-capture-feasibility-2026-08-16.md)：
 
-1. **批准歷史官方資料抓取程式**：逐日補齊 2025-01-01 起的 TWSE／TPEx session 級資料，須先確認官方歷史端點是否涵蓋該期間、可接受的抓取速率與重試政策。
-2. **解決 TPEx 交易日曆來源缺口**：目前完全沒有來源，TPEx 因此無法產生任何 `not-session` 判定。
-3. **決定證券生命週期歷史來源**：current-only master 無法描述任何歷史日期。
-4. **或調整 G0 固定期間**：若 2025 年資料不可得，可改為實際可達成的較短區間；但這需要新的 G0 版本與 Owner 批准，執行方不得自行縮小。
+| # | 決定 |
+|---|---|
+| D1 | 批准歷史官方資料抓取程式（限固定期間）|
+| D2 | TPEx 與 TWSE 共用證券市場行事曆（`owner-approved-policy`，非國家行事曆）|
+| D3 | 接受 377 筆缺上市日；但維持 `membership_state=unknown`，不自動 eligible |
+| D4 | 維持固定期間 2025-01-01 至 2026-08-03 |
+| D5 | TEJ PRO 納入 licensed-vendor lane（授權允許長期保留快照）|
 
-在上述決定前，任何 M3.2 以後的工作都不會產生有效輸出。M3.2 啟動後仍不得使用舊 `ScreenerStore` 的 replace／overwrite 路徑。
+**已驗證**：TWSE 與 TPEx 的 2025 年歷史日價端點都可供料（2025-01-02 分別為 1,274 與 943 檔）。
+
+**新發現的阻擋**：`holidaySchedule` 端點只回傳當年度，**2025 年官方行事曆已永久無法取得**，改由 TEJ 供應。
+
+### M3.1b 工程範圍
+
+1. 擴充 `m2_daily_price_shadow`：目前僅支援 TWSE（程式碼明確拒絕非 `TWSE-PRICE-HIST` 來源），且 target 集以 SHA-256 與筆數釘死在 96-session 修復集。需支援 TPEx 與任意 target 集。
+2. 保存兩市場對非交易日的不同回應（TWSE 拋無資料錯誤、TPEx 回零列）為 evidence，不得以重試掩蓋。
+3. 建立 TEJ 匯入器與 licensed-vendor lane。
+4. 建立年度行事曆例行擷取，避免 2027 年重蹈覆轍。
+
+抓取規模：580 日 × 2 市場 = 1,160 次請求，預估 1 至 2 小時。
+
+M3.2 啟動後仍不得使用舊 `ScreenerStore` 的 replace／overwrite 路徑。抓到資料**不等於**該日期成為 `supported`，仍須通過完整資料族 coverage 檢查。
 

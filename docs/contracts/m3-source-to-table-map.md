@@ -4,11 +4,13 @@
 
 | 欄位 | 值 |
 |---|---|
-| Contract ID | `tw-alpha-m3-source-map/1.0.0` |
+| Contract ID | `tw-alpha-m3-source-map/1.1.0` |
 | Availability policy | `tw-alpha-m3-availability/1.0.0` |
 | Conflict policy | `tw-alpha-m3-conflict/1.0.0` |
+| Licensed-vendor policy | `tw-alpha-m3-licensed-vendor/1.0.0` |
 | 狀態 | `approved-for-M3-shadow-build` |
 | 建立日 | 2026-08-16 |
+| 最後更新 | 2026-08-16（v1.1.0 加入 §1.8 TEJ lane 與 §1.2 行事曆政策）|
 | 上游 | [PIT warehouse contract](pit-warehouse-contract.md)、[M2 來源清冊](../m2-source-inventory.md) |
 | 涵蓋來源 | M2 durable archive 的 36 個 endpoint-level P0 sources |
 | 不涵蓋 | 交易成本、零股成交、帳本、策略評分（屬 M4 以後） |
@@ -30,9 +32,36 @@
 
 | Source ID | Endpoint | 目標表 | Scope | 限制 |
 |---|---|---|---|---|
-| `TWSE-CALENDAR` | `holiday-schedule` | `trading_calendar_pit` | 年度公告 | **僅 2026**；27 列、17 個落在固定期間內的休市日。TPEx 無對應來源 |
+| `TWSE-CALENDAR` | `holiday-schedule` | `trading_calendar_pit` | 當年度 | **僅 2026**；27 列、17 個落在固定期間內的休市日 |
+| `TEJ-CALENDAR` | TEJ PRO 交易日清單 | `trading_calendar_pit` | 歷史全量 | **2025 年唯一來源**；`licensed-vendor-snapshot` |
 
-**關鍵限制**：休市表是「例外清單」，不是完整 session table。日期不在清單中**不構成** `official-open` 證據。目前沒有任何來源可證明固定期間內任一日為開市日。
+**關鍵限制一**：休市表是「例外清單」，不是完整 session table。日期不在清單中**不構成** `official-open` 證據。
+
+**關鍵限制二（2026-08-16 發現）**：`holidaySchedule` 端點**沒有年度參數，只回傳當年度**。本日查詢結果為民國 115 年（2026）27 列。**2025 年的官方行事曆已無法取得**，因為當時未擷取。此為資料源限制，非工具限制。
+
+### 1.2.1 行事曆政策（`owner-approved-policy`）
+
+Owner 於 2026-08-16 批准（[決定文件](../evidence/m3-owner-decisions-and-capture-feasibility-2026-08-16.md) D2）：
+
+> **TPEx 與 TWSE 共用同一份證券市場行事曆。**
+
+此推定標記為 `owner-approved-policy`，**不是** `publisher-exact`。採用共用行事曆而非國家行事曆的理由：
+
+- **補班日**：政府為連假調移訂定的週六上班日，證券市場不開盤；
+- **颱風假與臨時停市**：不會出現在年初公告中；歷史上亦有補行交易日。
+
+因此**禁止**以「週一至週五減國定假日」產生交易日曆。
+
+**年度來源分工**：
+
+| 年度 | 行事曆來源 | Evidence state |
+|---|---|---|
+| 2025 | TEJ PRO 交易日清單 | `licensed-vendor-snapshot` |
+| 2026 | 官方 `TWSE-CALENDAR` 已擷取 | `verified-snapshot` |
+
+**交叉驗證**：官方日價檔存在與否作為佐證。TWSE 對非交易日回傳「很抱歉，沒有符合條件的資料!」，TPEx 回傳 `stat=ok` 但零列——兩者行為不同，都必須保存為 evidence，**不得**當成抓取失敗而重試掩蓋。零列**不是**休市的證明，只是佐證。
+
+**衍生行動**：必須建立年度行事曆的例行擷取，避免 2027 年重蹈 2025 年覆轍。
 
 ### 1.3 證券生命週期
 
@@ -45,7 +74,11 @@
 | `TWSE-DELISTING` | `delisted-companies` | `security_events` | 全量 | 245 筆 |
 | `TPEX-DELISTING-HIST` | `delisted-companies` | `security_events` | 全量 | 579 筆、569 unique keys |
 
-**身份規則**：`security_instance_id` 由 `market + symbol + listing_interval` 導出。已證實 2301、2432 同時出現於 delisted 與 current 資料，因此 `symbol + market` 不得作為永久身份。缺上市日者保留 `missing-at-source`，**不得**自動視為 eligible。
+| `TEJ-SECURITY-HIST` | TEJ PRO 上市下市歷史 | `security_events` | 歷史全量 | 補 377 筆 `missing-at-source`；`licensed-vendor-snapshot` |
+
+**身份規則**：`security_instance_id` 由 `market + symbol + listing_interval` 導出。已證實 2301、2432 同時出現於 delisted 與 current 資料，因此 `symbol + market` 不得作為永久身份。
+
+**缺上市日政策**（Owner 2026-08-16 決定 D3）：Owner 批准接受 TWSE 377 筆上市日 `missing-at-source`。但**接受缺漏不等於視為可交易**——這類證券在 as-of 查詢中維持 `membership_state=unknown`，不得自動 eligible。若 TEJ 能補上該日期，以 TEJ 值填入並標記 `licensed-vendor-snapshot`，且必須保留原始 `missing-at-source` 狀態供追溯。
 
 ### 1.4 每日股價
 
@@ -103,6 +136,33 @@
 | `MOPS-CASHFLOW-HIST` | `cashflow-company-historical` | `fundamentals_pit` | 2 家樣本（2330、6488）2026Q1 |
 
 **修訂規則**：修訂追加新 record 並 `supersedes_record_id` 指向前版，**不得**覆寫舊值後沿用舊 `available_at`。
+
+### 1.8 TEJ PRO（Licensed-vendor lane，policy v1.0.0）
+
+Owner 於 2026-08-16 確認 TEJ PRO 授權**允許本地快照長期保留**，且涵蓋歷史財報申報日與上市下市歷史兩個模組（決定 D5）。
+
+| TEJ 用途 | 補的缺口 | 目標表 |
+|---|---|---|
+| 交易日清單 | 2025 官方行事曆已無法取得 | `trading_calendar_pit` |
+| 上市／下市歷史日期 | TWSE 377 筆 `missing-at-source` | `security_events` |
+| 財報申報日 | 多數財報缺精確 `publisher_released_at` | `fundamentals_pit` |
+
+#### 不可違反的規則
+
+1. **TEJ 永不進入 canonical lane。** 所有 TEJ 衍生列的 `evidence_state` 固定為 `licensed-vendor-snapshot`。官方來源存在時，官方一律優先。
+2. **只採用帶有明確日期欄位的 TEJ 資料。** TEJ 是會被修訂的現值資料庫；今日查詢 2025 年得到的是「今日所知的 2025 年」，不是「2025 年當時所知」。沒有申報日／發布日欄位的資料**不得**用於推導 `decision_available_at`。
+3. **每次抓取必須保存快照與抓取時間**，並納入 `dataset_id` 的 fingerprint。不得今日抓取後即當成歷史事實。
+4. **價格不使用 TEJ。** 官方端點已驗證可供應 2025-2026 全市場逐檔日價；且 M0 契約要求正式驗證使用原始官方價，調整價須可重建。
+5. **授權邊界**：本 lane 僅供本專案內部研究與驗證。散布、對外提供服務或商業部署前必須重新確認 TEJ 授權條款。
+
+#### Availability basis
+
+TEJ 資料的 `availability_basis` 只允許兩種：
+
+- `publisher-exact`：TEJ 欄位本身即為官方申報日／發布日；
+- `unknown-blocked`：無日期欄位，不得用於 as-of 決策。
+
+**不允許**對 TEJ 資料使用 `first-observed-only`，因為那會把「我們今天抓到」誤記為「當時可得」，正是本專案要防止的偷看未來。
 
 ---
 
@@ -170,9 +230,12 @@ effective_from        <= as_of_session
 1. `historical` scope 的官方 endpoint；
 2. `latest` scope 的官方 endpoint（**僅限**其 `logical_period` 明確涵蓋該日期）；
 3. `official-no-data` 明示證據；
-4. 其他一律 `unknown`。
+4. `licensed-vendor-snapshot`（TEJ PRO）——**僅限**官方來源不存在或已無法取得的欄位，且該筆須帶明確日期欄位；
+5. 其他一律 `unknown`。
 
-`legacy-normalized-snapshot` **永遠不進入** canonical lane，只進比較／coverage lane。
+`legacy-normalized-snapshot` 與 `licensed-vendor-snapshot` **永遠不進入** canonical lane。前者只進比較／coverage lane；後者可補 canonical 查詢結果，但必須保留自己的 evidence state，不得被誤讀為官方資料。
+
+官方與 TEJ 對同一事實不一致時：**官方勝**，差異寫入 `data_quality_events`，兩筆並存。
 
 ### 3.3 Fail-closed 條件
 
@@ -192,10 +255,11 @@ effective_from        <= as_of_session
 
 以下為已知且**未**由本文件解決的缺口，必須在 M3 後續工作包或新的 Owner 決定處理：
 
-1. 固定期間內沒有任何來源可證明 `official-open`；需要新的官方日曆歷史抓取程式。
-2. TPEx 完全沒有交易日曆來源。
-3. 證券生命週期與市場狀態沒有歷史版本，只有 current snapshot。
-4. 季報 availability 沒有保守 bound，只能用 `first-observed-only`。
-5. 固定期間內耐久日價覆蓋僅 3 個 market-date；其餘 1,157 個無官方 session 級觀測。
+1. ~~固定期間內沒有任何來源可證明 `official-open`~~ → 2026 用官方行事曆，2025 用 TEJ（§1.2.1）。**但 2025 官方版本已永久無法取得**。
+2. ~~TPEx 完全沒有交易日曆來源~~ → 由 §1.2.1 的共用行事曆政策處理，標記 `owner-approved-policy`。
+3. **市場狀態**仍沒有歷史版本，只有 current snapshot；TEJ 未涵蓋此項。這是目前最大的未解缺口。
+4. 季報 availability 沒有保守 bound，只能用 `first-observed-only`（TEJ 申報日可改善此項）。
+5. 固定期間內耐久日價覆蓋僅 3 個 market-date；抓取程式（M3.1b）執行後才會改變。
+6. 尚未建立年度行事曆的例行擷取，2027 年有重蹈 2025 年覆轍的風險。
 
 這些缺口的量化結果見 [M3.1 coverage ledger 與耐久封存證據](../evidence/m3-1-coverage-ledger-and-durable-archival-2026-08-16.md)。
