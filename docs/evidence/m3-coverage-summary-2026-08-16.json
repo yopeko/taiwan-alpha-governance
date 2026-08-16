@@ -1,0 +1,86 @@
+{
+  "blocking_findings": [
+    "No official trading-calendar source covers 2025; TWSE holiday evidence exists only for 2026 and TPEx has no calendar source.",
+    "A date absent from the holiday schedule is NOT evidence of an open session; open sessions remain unproven.",
+    "Security lifecycle and market status are current-only snapshots and cannot describe any historical date.",
+    "Durable daily-price coverage inside the window is a single session (2026-07-31) for both markets; the 96-session repair archive is TWSE-only and almost entirely outside the window.",
+    "Zero market-dates reach `supported`; M3 exit is therefore not attainable without a new historical capture programme."
+  ],
+  "certificate_id": "tw-alpha-m3-coverage-ledger-20260816-01",
+  "durable_daily_price_sessions_in_window": {
+    "TPEX": {
+      "count": 1,
+      "dates": [
+        "2026-07-31"
+      ]
+    },
+    "TWSE": {
+      "count": 2,
+      "dates": [
+        "2026-07-02",
+        "2026-07-31"
+      ]
+    }
+  },
+  "durable_daily_price_sessions_total": {
+    "TPEX": 1,
+    "TWSE": 97
+  },
+  "generated_at": "2026-08-16T10:10:37.907506+00:00",
+  "inputs": {
+    "m2_dailyprice96": "C:\\project\\tw-sepa-screener\\data\\raw_v2\\m2_dailyprice96_2026-08-03",
+    "m2_main": "C:\\project\\tw-sepa-screener\\data\\raw_v2\\m2_2026-08-03"
+  },
+  "ledger_path": "C:\\project\\tw-sepa-screener\\data\\raw_v2\\m3_coverage_ledger_2026-08-16\\coverage_ledger.csv",
+  "ledger_sha256": "d72899d424dfe577a0ca3d00bb76cf2ffd908ec2523fa7def64d5f52e6f1f9f1",
+  "markets": [
+    "TWSE",
+    "TPEX"
+  ],
+  "official_closure_dates_in_window": {
+    "TPEX": [],
+    "TWSE": [
+      "2026-01-01",
+      "2026-02-12",
+      "2026-02-13",
+      "2026-02-15",
+      "2026-02-16",
+      "2026-02-17",
+      "2026-02-18",
+      "2026-02-19",
+      "2026-02-20",
+      "2026-02-27",
+      "2026-02-28",
+      "2026-04-03",
+      "2026-04-04",
+      "2026-04-05",
+      "2026-04-06",
+      "2026-05-01",
+      "2026-06-19"
+    ]
+  },
+  "reconstruction_state_counts": {
+    "not-session": 17,
+    "partial": 3,
+    "unknown": 1140
+  },
+  "reconstruction_state_counts_by_market": {
+    "TPEX": {
+      "partial": 1,
+      "unknown": 579
+    },
+    "TWSE": {
+      "not-session": 17,
+      "partial": 2,
+      "unknown": 561
+    }
+  },
+  "row_count": 1160,
+  "schema_id": "tw-alpha-pit-coverage-certificate/1.0.0",
+  "status": "gap-ledger-only-not-a-supported-date-certificate",
+  "window": {
+    "calendar_dates": 580,
+    "end": "2026-08-03",
+    "start": "2025-01-01"
+  }
+}

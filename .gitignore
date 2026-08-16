@@ -1,0 +1,18 @@
+# 本倉庫只保存治理契約、ADR 與 evidence 文件，不保存資料或程式碼。
+# 實際資料與程式碼的權威位置是 C:\project\tw-sepa-screener。
+
+# 大型資料副本：非權威來源，且逐日被排程更新
+data/
+
+# Codex/agent 暫存執行目錄與 pytest 隔離目錄
+.codex_tmp/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# OS
+Thumbs.db
+desktop.ini
+.DS_Store
