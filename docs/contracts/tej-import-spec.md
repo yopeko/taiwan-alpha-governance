@@ -1,0 +1,126 @@
+# TEJ PRO 匯入規格（Licensed-vendor lane）
+
+## 0. 文件控制
+
+| 欄位 | 值 |
+|---|---|
+| Spec ID | `tw-alpha-tej-import/1.0.0` |
+| 狀態 | `approved-for-M3-shadow-build` |
+| 建立日 | 2026-08-16 |
+| 授權依據 | Owner 決定 D5（[決定文件](../evidence/m3-owner-decisions-and-capture-feasibility-2026-08-16.md)）：授權允許本地快照長期保留，涵蓋歷史財報申報日與上市下市歷史 |
+| Evidence state | 所有匯入列固定為 `licensed-vendor-snapshot` |
+| 上游規則 | [Source-to-Table Map §1.8](m3-source-to-table-map.md) |
+
+TEJ 資料**永遠不進入** canonical lane。本規格只定義如何把 TEJ 匯出檔安全地帶進比較與補漏用途。
+
+---
+
+## 1. 需要從 TEJ 匯出的三個模組
+
+匯出格式接受 `.csv`、`.xlsx`、`.txt`（tab 分隔）。建議 CSV / UTF-8。
+
+### 1.1 交易日曆（`trading-calendar`）
+
+**用途**：2025 年官方行事曆已無法取得，這是唯一來源。
+
+| 必要欄位 | 說明 | 常見 TEJ 欄名 |
+|---|---|---|
+| 日期 | 交易日 | `年月日`、`mdate`、`交易日期` |
+| 市場別 | 上市／上櫃 | `市場別`、`market` |
+
+**匯出範圍**：2025-01-01 至 2026-08-03，上市與上櫃分別匯出或同檔含市場別欄位。
+
+**重要**：只需要「有交易的日期清單」。系統會把清單內的日期視為 `official-open`（標記 `licensed-vendor-snapshot`），清單外的日期視為 `not-session` 候選，再與官方價格檔存在與否交叉驗證。
+
+如果 TEJ 沒有獨立的行事曆表，可改用**任一大型權值股的日報酬序列**（例如 2330）的日期欄位當作交易日清單——但必須在匯入時註明來源方式，因為個股停牌會造成缺漏。
+
+### 1.2 上市下市歷史（`security-listing`）
+
+**用途**：補 TWSE 377 筆 `missing-at-source` 的上市日。
+
+| 必要欄位 | 說明 | 常見 TEJ 欄名 |
+|---|---|---|
+| 證券代碼 | 股票代號 | `證券代碼`、`coid` |
+| 市場別 | 上市／上櫃 | `市場別`、`market` |
+| 上市日 | 掛牌日 | `上市日`、`上市日期`、`listing_date` |
+| 下市日 | 終止上市日；仍在市可留空 | `下市日`、`下市日期`、`delisting_date` |
+
+**選填但有價值**：`證券名稱`、`產業別`、`證券類別`（用來確認是否為普通股，M0 只含普通股）。
+
+**匯出範圍**：全部上市與上櫃證券，含已下市者。不要只匯出現存證券——已下市的才是關鍵。
+
+### 1.3 財報申報日（`financial-announcement`）
+
+**用途**：補 `decision_available_at`。目前多數財報只能用「我們第一次看到的時間」，會系統性低估可用時間。
+
+| 必要欄位 | 說明 | 常見 TEJ 欄名 |
+|---|---|---|
+| 證券代碼 | 股票代號 | `證券代碼`、`coid` |
+| 財報期別 | 年季或年月 | `年季`、`年月`、`period` |
+| 申報日 | **官方公告／申報日期** | `編制日`、`申報日`、`公告日`、`announce_date` |
+
+**這是最關鍵的欄位**：必須是「公司向主管機關申報的日期」，**不是** TEJ 更新資料庫的日期，也不是財報期末日。若 TEJ 同時提供多個日期欄位，優先順序為：申報日 ＞ 公告日 ＞ 編制日。
+
+**匯出範圍**：2024Q1 起（要涵蓋固定期間內可能被使用的財報，需往前一年）至 2026Q2，月營收則為 2024-01 至 2026-07。
+
+---
+
+## 2. 匯入時的強制檢查
+
+匯入器會拒絕以下情況，不會靜默略過：
+
+| 情況 | 處置 |
+|---|---|
+| 缺必要欄位 | 整檔拒絕 |
+| 日期欄位為空或無法解析 | 該列進 `rejected`，不進 lane |
+| 財報列缺申報日 | 該列進 `rejected`——沒有日期就無法用於 as-of |
+| 市場別無法對應 TWSE／TPEX | 該列進 `rejected` |
+| 同一 key 重複且值不同 | 兩列並存，標 `conflict`，不自動選一 |
+
+**設計理由**：TEJ 是會被修訂的現值資料庫。沒有明確日期的列一旦進入 lane，就會把「我們今天抓到」誤記為「當時可得」，這正是整個專案要防止的偷看未來。
+
+---
+
+## 3. 匯入產物
+
+每次匯入產生一個不可變的快照目錄：
+
+```text
+tej_snapshots/<snapshot_id>/
+    import_manifest.json      匯入時間、來源檔雜湊、欄位對應、列數、拒絕數
+    source_files/             原始匯出檔的逐字複本
+    normalized/               正規化後的 parquet
+    rejected/                 被拒絕的列與原因
+```
+
+`snapshot_id` 為來源檔內容雜湊與欄位對應的組合，同樣輸入產生同樣 ID。
+
+**每列必帶**：`evidence_state=licensed-vendor-snapshot`、`vendor=TEJ`、`snapshot_id`、`source_file_sha256`、`imported_at`、`vendor_date_field`（實際採用了哪個日期欄位）。
+
+---
+
+## 4. 授權邊界
+
+- 本 lane 僅供本專案內部研究與驗證使用。
+- 散布、對外提供網路服務或商業部署前，必須重新確認 TEJ 授權條款。
+- 匯入產物不得包含 TEJ 帳號、憑證或連線字串。
+- 若日後授權變更，處置方式比照 M2 的 `license-owner-approval-required` 隔離流程。
+
+---
+
+## 5. 執行方式
+
+```bash
+./.venv/Scripts/python.exe scripts/m3/tej_import.py \
+    --module trading-calendar \
+    --input <匯出檔路徑> \
+    --output-root C:\tmp\tw-alpha-m3-tej-20260816-01
+```
+
+欄位名稱若與預設不符，用 `--map` 指定，例如：
+
+```bash
+--map date=年月日 --map market=市場別
+```
+
+匯入器會先列出偵測到的欄位，確認無誤後才寫入。
