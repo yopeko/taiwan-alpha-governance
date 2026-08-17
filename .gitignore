@@ -16,3 +16,7 @@ __pycache__/
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# TEJ 授權廠商匯出檔：不得進入版本控制或對外散布
+*.zip
+tej_exports/

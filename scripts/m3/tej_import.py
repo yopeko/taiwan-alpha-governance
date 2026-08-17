@@ -39,16 +39,22 @@ MODULES: dict[str, dict[str, Any]] = {
         "required": {
             "symbol": ["證券代碼", "股票代號", "公司代碼", "coid", "symbol"],
             "market": ["市場別", "市場", "market", "mkt"],
-            "listing_date": ["上市日", "上市日期", "掛牌日", "listing_date"],
         },
         "optional": {
+            "listing_date": ["上市日", "上市日期", "掛牌日", "listing_date"],
+            # TEJ splits the listing date across one column per board.
+            "listing_date_tse": ["TSE上市日"],
+            "listing_date_otc": ["OTC上市日"],
             "delisting_date": ["下市日", "下市日期", "終止上市日", "delisting_date"],
             "security_name": ["證券名稱", "公司名稱", "name"],
             "security_type": ["證券類別", "證券種類", "security_type"],
             "industry": ["產業別", "industry"],
         },
-        "date_fields": ["listing_date"],
+        "date_fields": ["listing_date", "listing_date_tse", "listing_date_otc"],
         "key": ["market", "symbol", "listing_date"],
+        # Board-specific listing columns are folded into listing_date.
+        "resolve_listing_date": True,
+        "deduplicate": True,
     },
     "financial-announcement": {
         "required": {
@@ -59,13 +65,16 @@ MODULES: dict[str, dict[str, Any]] = {
                 "申報日",
                 "公告日",
                 "公告日期",
+                "財報發布日",
                 "編制日",
                 "announce_date",
                 "announcement_date",
             ],
         },
         "optional": {
-            "statement_type": ["報表別", "報表種類", "statement_type"],
+            "statement_type": ["報表別", "報表種類", "財報類別（1個別2個體3合併）"],
+            "period_end": ["財報年月迄日"],
+            "market": ["市場別", "市場", "market", "mkt"],
         },
         "date_fields": ["announce_date"],
         "key": ["symbol", "period", "announce_date"],
@@ -76,15 +85,16 @@ MARKET_ALIASES = {
     "TWSE": "TWSE",
     "TSE": "TWSE",
     "上市": "TWSE",
-    "市": "TWSE",
-    "1": "TWSE",
     "TPEX": "TPEX",
     "OTC": "TPEX",
     "TPE": "TPEX",
     "上櫃": "TPEX",
-    "櫃": "TPEX",
-    "2": "TPEX",
 }
+# M0 restricts the universe to TWSE/TPEx common stock. These boards are
+# recognised so they can be rejected with a precise reason rather than
+# silently falling through as an unmapped market.
+EXCLUDED_MARKETS = {"REG": "興櫃", "TIB": "臺灣創新板", "PSB": "公開發行"}
+NULL_MARKERS = {"", "nan", "nat", "none", "-", "--", ".", "null"}
 
 
 def file_sha256(path: Path) -> str:
@@ -96,15 +106,29 @@ def file_sha256(path: Path) -> str:
 
 
 def read_table(path: Path) -> pd.DataFrame:
-    suffix = path.suffix.lower()
-    if suffix in {".xlsx", ".xls"}:
+    """Read a vendor export, sniffing encoding and separator.
+
+    TEJ PRO exports UTF-16 tab-separated files with a .csv extension, so
+    neither can be assumed from the suffix.
+    """
+
+    if path.suffix.lower() in {".xlsx", ".xls"}:
         return pd.read_excel(path, dtype=str)
-    if suffix == ".txt":
-        return pd.read_csv(path, sep="\t", dtype=str, encoding_errors="replace")
-    for encoding in ("utf-8-sig", "cp950", "utf-8"):
+
+    head = path.open("rb").read(65536)
+    encodings = ["utf-8-sig", "cp950", "utf-8"]
+    if head[:2] in (b"\xff\xfe", b"\xfe\xff") or head[1:2] == b"\x00":
+        encodings.insert(0, "utf-16")
+    for encoding in encodings:
         try:
-            return pd.read_csv(path, dtype=str, encoding=encoding)
-        except UnicodeDecodeError:
+            sample = head.decode(encoding, errors="strict")
+        except (UnicodeDecodeError, UnicodeError):
+            continue
+        first = sample.splitlines()[0] if sample.splitlines() else ""
+        separator = "\t" if first.count("\t") > first.count(",") else ","
+        try:
+            return pd.read_csv(path, sep=separator, dtype=str, encoding=encoding)
+        except (UnicodeDecodeError, UnicodeError):
             continue
     raise ValueError(f"cannot decode {path.name}; re-export as UTF-8 CSV")
 
@@ -144,7 +168,7 @@ def normalize_date(value: Any) -> str | None:
     if value is None:
         return None
     text = str(value).strip()
-    if not text or text.lower() in {"nan", "nat", "none", "-", "--"}:
+    if text.lower() in NULL_MARKERS:
         return None
     text = text.replace("/", "-").replace(".", "-")
     parts = text.split("-")
@@ -175,14 +199,31 @@ def normalize_date(value: Any) -> str | None:
     return None
 
 
-def normalize_market(value: Any) -> str | None:
+def normalize_market(value: Any) -> tuple[str | None, str | None]:
+    """Return (market, reject_reason). Excluded boards get a precise reason."""
+
     text = str(value).strip().upper()
+    if text.lower() in NULL_MARKERS:
+        return None, "missing-market"
     if text in MARKET_ALIASES:
-        return MARKET_ALIASES[text]
+        return MARKET_ALIASES[text], None
+    if text in EXCLUDED_MARKETS:
+        return None, f"out-of-universe-board:{text}"
     for alias, target in MARKET_ALIASES.items():
-        if alias and alias in text:
-            return target
-    return None
+        if alias in text:
+            return target, None
+    return None, "unmapped-market"
+
+
+def normalize_symbol(value: Any) -> str | None:
+    """TEJ packs code and name into one field, e.g. '1309 台達化'."""
+
+    if value is None:
+        return None
+    text = str(value).strip()
+    if text.lower() in NULL_MARKERS:
+        return None
+    return text.split()[0] if text.split() else None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -254,19 +295,72 @@ def main(argv: list[str] | None = None) -> int:
                     reasons.append(f"unparsable-required-date:{field}")
                 out[field] = normalized
             elif field == "market":
-                normalized = normalize_market(value)
+                normalized, reason = normalize_market(value)
+                if reason:
+                    reasons.append(reason)
+                out[field] = normalized
+            elif field == "symbol":
+                normalized = normalize_symbol(value)
                 if normalized is None:
-                    reasons.append("unmapped-market")
+                    reasons.append("empty-required:symbol")
                 out[field] = normalized
             else:
                 text = None if value is None else str(value).strip()
+                if text and text.lower() in NULL_MARKERS:
+                    text = None
                 if not text and field in module["required"]:
                     reasons.append(f"empty-required:{field}")
                 out[field] = text
+
+        # Fold TEJ's board-specific listing columns into one listing_date,
+        # chosen by the row's own market so the two can never disagree.
+        if module.get("resolve_listing_date") and not reasons:
+            if not out.get("listing_date"):
+                board = {
+                    "TWSE": out.pop("listing_date_tse", None),
+                    "TPEX": out.pop("listing_date_otc", None),
+                }
+                out["listing_date"] = board.get(out.get("market"))
+                out["listing_date_basis"] = (
+                    "board-column" if out["listing_date"] else "missing-at-source"
+                )
+            else:
+                out["listing_date_basis"] = "single-column"
+            out.pop("listing_date_tse", None)
+            out.pop("listing_date_otc", None)
+            if not out["listing_date"]:
+                reasons.append("missing-listing-date")
+
         if reasons:
             rejected.append({**out, "reject_reasons": reasons})
         else:
             rows.append(out)
+
+    # The listing export carries one row per reporting period, so the same
+    # security repeats. Collapse to one row per security instance and record
+    # any security whose repeated rows disagree instead of picking a winner.
+    conflicts: list[dict[str, Any]] = []
+    if module.get("deduplicate") and rows:
+        grouped: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
+        compare = ("listing_date", "delisting_date", "security_name")
+        for row in rows:
+            grouped.setdefault((row.get("market"), row.get("symbol")), []).append(row)
+        deduplicated: list[dict[str, Any]] = []
+        for key, group in grouped.items():
+            variants = {tuple(row.get(f) for f in compare) for row in group}
+            if len(variants) > 1:
+                conflicts.append(
+                    {
+                        "market": key[0],
+                        "symbol": key[1],
+                        "variant_count": len(variants),
+                        "variants": [list(v) for v in sorted(variants, key=str)],
+                    }
+                )
+            keeper = dict(group[0])
+            keeper["source_row_count"] = len(group)
+            deduplicated.append(keeper)
+        rows = deduplicated
 
     snapshot_id = hashlib.sha256(
         json.dumps(
@@ -313,6 +407,11 @@ def main(argv: list[str] | None = None) -> int:
         pd.DataFrame(rejected).to_parquet(
             root / "rejected" / "rows.parquet", index=False
         )
+    if conflicts:
+        (root / "rejected" / "conflicts.json").write_text(
+            json.dumps(conflicts, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
 
     duplicate_keys = 0
     if rows:
@@ -329,6 +428,7 @@ def main(argv: list[str] | None = None) -> int:
             "accepted_rows": len(rows),
             "rejected_rows": len(rejected),
             "duplicate_keys": duplicate_keys,
+            "conflicting_securities": len(conflicts),
             "evidence_state": EVIDENCE_STATE,
             "lane": "licensed-vendor",
             "canonical_lane": False,
