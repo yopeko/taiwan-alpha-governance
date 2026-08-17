@@ -33,11 +33,11 @@ from tw_sepa_screener.m2_quality_profiles import (  # noqa: E402
     build_daily_price_quality_policy,
 )
 from tw_sepa_screener.parse_replay import ParseReplayStore  # noqa: E402
-from tw_sepa_screener.parsers.formal import (  # noqa: E402
-    build_formal_p0_parser_registry,
-)
+from market_status_parsers import build_m3_parser_registry  # noqa: E402
+from market_status_sources import build_m3_registry  # noqa: E402
 from tw_sepa_screener.quality_events import QualityStore  # noqa: E402
 from tw_sepa_screener.raw_capture import RawCaptureStore  # noqa: E402
+# source registry composed via market_status_sources
 from tw_sepa_screener.sources.raw_registry import (  # noqa: E402
     build_p0_formal_registry,
 )
@@ -132,8 +132,8 @@ def build(
     root.mkdir(parents=True, exist_ok=True)
 
     before = protected_fingerprints()
-    source_registry = build_p0_formal_registry()
-    parser_registry = build_formal_p0_parser_registry()
+    source_registry = build_m3_registry()
+    parser_registry = build_m3_parser_registry()
     price_policy = build_daily_price_quality_policy()
     quality_sources = set(price_policy.source_ids)
 
