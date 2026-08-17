@@ -44,11 +44,22 @@ def tree_manifest(root: Path) -> dict:
 
 
 def verify_blobs(root: Path) -> dict:
+    """Verify payload bytes for every observation that has a payload.
+
+    A `transport-failed` observation is a recorded failed attempt and
+    correctly carries no blob, so it is counted separately rather than
+    reported as a missing payload.
+    """
+
     checked = 0
     mismatches: list[str] = []
     missing: list[str] = []
+    no_payload = 0
     for manifest_path in sorted((root / "raw_observations").rglob("manifest.json")):
         manifest = json.loads(manifest_path.read_bytes())
+        if str(manifest.get("capture_status")) != "hash-verified":
+            no_payload += 1
+            continue
         blob_id = str(manifest["blob_id"])
         blob = root / "raw_blobs" / "sha256" / blob_id[:2] / blob_id / "payload.bin"
         if not blob.is_file():
@@ -62,6 +73,7 @@ def verify_blobs(root: Path) -> dict:
         "blobs_verified": checked,
         "hash_mismatches": mismatches,
         "missing_blobs": missing,
+        "observations_without_payload": no_payload,
     }
 
 
@@ -71,6 +83,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--primary", type=Path, required=True)
     parser.add_argument("--backup", type=Path, required=True)
     parser.add_argument("--record-id", required=True)
+    parser.add_argument(
+        "--verify-only",
+        action="store_true",
+        help="destinations already exist: re-verify and write the record only",
+    )
     args = parser.parse_args(argv)
 
     report: dict = {
@@ -87,12 +104,13 @@ def main(argv: list[str] | None = None) -> int:
     report["source_blob_verification"] = verify_blobs(args.source)
 
     for name, destination in (("primary", args.primary), ("backup", args.backup)):
-        if destination.exists():
+        if destination.exists() and not args.verify_only:
             report["verdict"] = f"blocked-{name}-exists"
             print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
             return 1
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(args.source, destination)
+        if not destination.exists():
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(args.source, destination)
         tree = tree_manifest(destination)
         report["copies"][name] = {
             "path": str(destination),
