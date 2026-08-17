@@ -9,8 +9,8 @@
 | 進場日期 | 2026-08-03 |
 | 前置里程碑 | M0、M1、M2 `complete` |
 | 本階段輸出 | 獨立、可回復、不可覆寫正式資料的 point-in-time shadow warehouse |
-| 目前工作包 | M3.2 待啟動，但已量化證實缺乏輸入資料 |
-| 最後更新 | 2026-08-16 |
+| 目前工作包 | M3.4 每日股價與公司行動（M3.0–M3.3 已 complete）|
+| 最後更新 | 2026-08-17 |
 
 M3 的目的不是先做選股，而是回答一個較基本的問題：在某個歷史決策時間，系統當時真正知道哪些股票、交易日、價格、交易狀態、公司行動及財務資訊。
 
@@ -51,8 +51,11 @@ Owner 已於 2026-08-03 批准 [`G0-A-fixed-window-certified-dates`](evidence/m3
 | M3.0 進場凍結 | `complete` | 記錄來源、程式與受保護資料指紋；驗證 M2 archive；確認 shadow 邊界 | [M3 entry baseline](evidence/m3-entry-baseline-2026-08-03.md) |
 | M3.1 契約與來源映射 | `complete` | G0 已批准；完成資料表、時間語意、availability、衝突規則與 source-to-table map | [PIT warehouse contract](contracts/pit-warehouse-contract.md)、[G0 決定](evidence/m3-g0-owner-decision-2026-08-03.md)、[source-to-table map 與 policy](contracts/m3-source-to-table-map.md)、[M3.1 完成證據](evidence/m3-1-coverage-ledger-and-durable-archival-2026-08-16.md) |
 | M3.1b 歷史抓取程式 | `complete` | 擴充抓取工具支援 TPEx 與任意日期範圍；抓取固定期間 TWSE／TPEx 日價；建立 TEJ licensed-vendor 匯入通道 | [M3.1b 完成證據](evidence/m3-1b-window-capture-2026-08-16.md)：1,160/1,160 零錯誤、耐久封存 tree `a07a4b5b…`、ledger v2 `unknown` 歸零 |
-| M3.1c TEJ 匯入 | `pending` | 匯入交易日曆、上市下市歷史、財報申報日 | 待 Owner 提供 TEJ 匯出檔；規格見 [TEJ 匯入規格](contracts/tej-import-spec.md) |
-| M3.2 Append-only staging | `pending` | 從通過 gate 的 observation 建立 lineage 完整的 staging；同輸入重建結果一致 | 已有 764 個交易日的日價輸入可用 |
+| M3.1c TEJ 匯入 | `complete` | 匯入上市下市歷史與財報申報日 | [M3.1c 證據](evidence/m3-1c-tej-import-2026-08-16.md)：生命週期覆蓋 96.2%、財報可用性由 0 筆升至 8,540 筆 |
+| M3.1d 市場狀態抓取 | `complete` | 新增 4 個官方歷史端點；抓取處置與注意；D7 回補變更交易方法；D8 停牌推定政策 | [D6–D8 決定與抓取](evidence/m3-owner-decisions-d6-d8-2026-08-16.md)：80/80 成功、1,261 筆處置全具公布日期 |
+| M3.1e TWSE 公司行動 | `complete` | 抓取 TWSE 除權息歷史 | [M3.1e 證據與 ledger v3](evidence/m3-1e-corporate-actions-and-ledger-v3-2026-08-16.md)：20/20 成功、2,388 筆 |
+| M3.1f TPEx 公司行動 | `complete` | 依 D10 以 MOPS 逐檔逐年抓取 899 檔 × 3 個民國年 | [M3.1f 證據與 ledger v4](evidence/m3-1f-tpex-actions-and-ledger-v4-2026-08-16.md)：2,313 筆公告、**764/764 交易日 supported** |
+| M3.2 Append-only staging | `complete` | 從通過 gate 的 observation 建立 lineage 完整的 staging；同輸入重建結果一致 | [M3.2 證據](evidence/m3-2-staging-2026-08-16.md)：6,144 觀測／850,071 列、dataset_id 內容定址、重建逐檔一致 |
 | M3.3 日曆與證券生命週期 | `complete`（有已知限制）| 建立 trading_calendar_pit、security_events、security_intervals 與 security_instance_id | [M3.3 golden-date 測試](../tests/invariant/test_m3_3_golden_dates.py)：日曆 764 開市／396 休市／0 unknown；1,962 個 instance。**已知限制**：TEJ 匯入以 (market, symbol) 去重，代號重用會被合併，已標為 strict xfail |
 | M3.4 每日股價與公司行動 | `pending` | 保留 `ohlc_state`、activity scope、公告／觀測時間及修訂；禁止推補 OHLC | price/action PIT tests |
 | M3.5 市場狀態與財報 | `pending` | 納入停牌、處置、變更交易及 revision-safe 財報；缺覆蓋保持 unknown | cutoff/revision tests |

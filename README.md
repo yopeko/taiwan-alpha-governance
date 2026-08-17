@@ -9,7 +9,8 @@
 | M0 證據與市場契約 | complete | 2026-08-02 | [M0 專案契約](docs/m0-project-contract.md) |
 | M1 架構與重用稽核 | complete | 2026-08-02 | [M1 架構與重用稽核](docs/m1-architecture-reuse-audit.md) |
 | M2 官方不可變原始資料 | complete | 2026-08-03 | 36 sources、56 live observations、55 initial accepted + 1 released quarantine、0 unresolved；正式封存與 E: 備份均通過稽核。[M2 closure evidence](docs/evidence/m2-owner-approvals-release-and-durable-audit-2026-08-03.md) |
-| M3 Point-in-time warehouse | in progress | - | M3.0／M3.1 complete。Owner 已於 2026-08-16 批准 D1–D5，抓取阻擋解除；下一步 M3.1b 歷史抓取。[M3 計畫](docs/m3-point-in-time-warehouse-plan.md)、[M3.1 證據](docs/evidence/m3-1-coverage-ledger-and-durable-archival-2026-08-16.md)、[Owner 決定](docs/evidence/m3-owner-decisions-and-capture-feasibility-2026-08-16.md) |
+| M3 Point-in-time warehouse | in progress | - | M3.0–M3.3 complete；抓取階段結束。依 G0 v2.0.0 計分：supported 764／not-session 396／partial 0／unknown 0。剩 M3.4–M3.8。[M3 計畫](docs/m3-point-in-time-warehouse-plan.md)、[ledger v4 證據](docs/evidence/m3-1f-tpex-actions-and-ledger-v4-2026-08-16.md) |
+| M4 台股規則與成本 | in progress | - | 參考實作與 50 項測試完成；檔位由 406,445 筆官方收盤價實測推導。剩除權息日漲跌停公式、減資、新上市前五日與上游化。[M4 契約](docs/contracts/m4-market-rules-contract.md) |
 
 詳細狀態及退出門檻見 [里程碑登錄表](docs/milestone-register.md)。
 
@@ -63,6 +64,13 @@ AlphaMaster 不得直接寫入正式策略、紙上帳本或真實委託；AI �
 - [M3 Owner 決定 D1–D5 與抓取可行性驗證](docs/evidence/m3-owner-decisions-and-capture-feasibility-2026-08-16.md)
 - [TEJ PRO 匯入規格](docs/contracts/tej-import-spec.md)
 - [M3.1b 完成證據：固定期間全量抓取與 ledger v2](docs/evidence/m3-1b-window-capture-2026-08-16.md)
+- [M3.1c TEJ licensed-vendor lane 匯入](docs/evidence/m3-1c-tej-import-2026-08-16.md)
+- [M3 Owner 決定 D6–D8 與市場狀態抓取](docs/evidence/m3-owner-decisions-d6-d8-2026-08-16.md)
+- [M3.1e 公司行動抓取與 coverage ledger v3](docs/evidence/m3-1e-corporate-actions-and-ledger-v3-2026-08-16.md)
+- [M3 G0 修訂 v2.0.0 與決定 D9–D10](docs/evidence/m3-g0-amendment-d9-d10-2026-08-16.md)
+- [M3.1f TPEx 公司行動與 coverage ledger v4](docs/evidence/m3-1f-tpex-actions-and-ledger-v4-2026-08-16.md)
+- [M3.2 Append-only staging](docs/evidence/m3-2-staging-2026-08-16.md)
+- [M4 台股規則與成本契約](docs/contracts/m4-market-rules-contract.md)
 
 ## 已凍結的 M0 基線
 
@@ -88,34 +96,27 @@ M2 只能建立官方不可變原始資料層及其追溯驗收。M0/M1/M2 不�
 - 使用 NT$10,000 進行真實交易；
 - 將任何 AlphaMaster 因子宣稱為已驗證台股策略。
 
-## M3 目前狀態（2026-08-16 更新）
+## M3 目前狀態（2026-08-17 更新）
 
-M3.0 進場凍結與 M3.1 契約與來源映射皆已 `complete`；M3.2 起為 `blocked`，原因是缺輸入資料而非尚未動工。
+M3.0 至 M3.3 皆已 `complete`，抓取階段結束。
 
-G0 已於 2026-08-03 批准：固定基準期間為 2025-01-01 至 2026-08-03，TWSE 與 TPEx 分開逐日認證。只有 coverage certificate 明確標為 `supported` 的 market-date 受到承諾；未列、`partial`、`blocked` 或 `unknown` 一律拒絕使用。
+G0 於 2026-08-03 批准固定期間 2025-01-01 至 2026-08-03；2026-08-16 以 **G0 v2.0.0** 修訂，批准 TEJ `licensed-vendor-snapshot` 證據可計入 `supported`，附六項強制條件（lane 不變、官方優先、可追溯、可分離重跑、雙軌計分保留、僅限已批准模組）。
 
-2026-08-16 依 Owner 決定 D1 完成固定期間全量抓取：1,160/1,160 個 market-date 零錯誤，764 個交易日、396 個非交易日，18 分鐘完成，正式 stores 未變動。
+**Coverage ledger v4**（1,160 個 market-date）：
 
-Coverage ledger 前後對照：
-
-| State | v1（抓取前）| v2（抓取後）|
+| State | 嚴格（僅官方）| 依 D9（含授權廠商）|
 |---|---:|---:|
-| `supported` | 0 | 0 |
-| `not-session` | 17 | **396** |
-| `partial` | 3 | **764** |
-| `unknown` | 1,140 | **0** |
+| `supported` | 0 | **764** |
+| `not-session` | 396 | 396 |
+| `partial` | 764 | **0** |
+| `unknown` | 0 | **0** |
 
-**`unknown` 歸零**——固定期間內每一個 market-date 現在都有官方證據支撐。
+嚴格計分下僅剩 `security_lifecycle` 與 `fundamental` 的授權廠商依賴，這正是 D9 批准的範圍。
 
-兩項實證發現：兩市場交易日**完全一致**（382 對 382，零分歧），支持 D2 的共用行事曆政策；**2026-07-10 兩市場休市但不在官方年度行事曆中**，證實禁止推算交易日曆的規定是必要的。
+**已建立的資料層**：M3.2 staging 6,144 觀測／850,071 列，dataset_id 內容定址且重建逐檔一致；M3.3 三張 PIT 表（`trading_calendar_pit` 1,160 列、`security_events` 1,975 列、`security_intervals` 1,962 個 instance）並通過 golden-date 測試。
 
-`supported` 仍為 0，阻擋原因已由「沒有資料」轉為四個特定資料族：
+**G0 §5 退出條件**：條件 1–3（coverage）已滿足；**條件 4–5 尚未開始**——`supported` 日期的 PIT／revision／lineage 規則未驗證，anti-lookahead、deterministic rebuild、restore 與 Validation Owner 簽核未執行，屬 M3.4–M3.8。
 
-| 阻擋資料族 | 影響 | 解法 |
-|---|---:|---|
-| `market_status` current-only | 764 | **無任何已批准來源** ⛔ |
-| `security_lifecycle` current-only | 764 | TEJ 上市下市歷史（已批准，待匯入）|
-| `fundamental` partial | 764 | TEJ 財報申報日（已批准，待匯入）|
-| `corporate_action` unknown | 763 | 官方除權息歷史抓取 |
+因此 M3 的正確狀態是「**資料齊全，倉庫未驗**」。抓到全部原始資料不等於能在指定 cutoff 正確重建當時狀態。
 
-詳見 [M3.1b 完成證據](docs/evidence/m3-1b-window-capture-2026-08-16.md)。所有 M3 產物仍必須落在獨立 shadow；缺資料保持 `unknown` 或 `blocked`，不得用今日狀態、事後修訂或 legacy 資料補成歷史真相。
+所有 M3 產物仍落在獨立 shadow；缺資料保持 `unknown` 或 `blocked`，不得用今日狀態、事後修訂或 legacy 資料補成歷史真相。
