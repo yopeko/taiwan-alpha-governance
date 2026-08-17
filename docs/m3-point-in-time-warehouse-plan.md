@@ -9,7 +9,7 @@
 | 進場日期 | 2026-08-03 |
 | 前置里程碑 | M0、M1、M2 `complete` |
 | 本階段輸出 | 獨立、可回復、不可覆寫正式資料的 point-in-time shadow warehouse |
-| 目前工作包 | M3.4 每日股價與公司行動（M3.0–M3.3 已 complete）|
+| 目前工作包 | M3.5 市場狀態與財報（M3.0–M3.4 已 complete）|
 | 最後更新 | 2026-08-17 |
 
 M3 的目的不是先做選股，而是回答一個較基本的問題：在某個歷史決策時間，系統當時真正知道哪些股票、交易日、價格、交易狀態、公司行動及財務資訊。
@@ -57,7 +57,7 @@ Owner 已於 2026-08-03 批准 [`G0-A-fixed-window-certified-dates`](evidence/m3
 | M3.1f TPEx 公司行動 | `complete` | 依 D10 以 MOPS 逐檔逐年抓取 899 檔 × 3 個民國年 | [M3.1f 證據與 ledger v4](evidence/m3-1f-tpex-actions-and-ledger-v4-2026-08-16.md)：2,313 筆公告、**764/764 交易日 supported** |
 | M3.2 Append-only staging | `complete` | 從通過 gate 的 observation 建立 lineage 完整的 staging；同輸入重建結果一致 | [M3.2 證據](evidence/m3-2-staging-2026-08-16.md)：6,144 觀測／850,071 列、dataset_id 內容定址、重建逐檔一致 |
 | M3.3 日曆與證券生命週期 | `complete`（有已知限制）| 建立 trading_calendar_pit、security_events、security_intervals 與 security_instance_id | [M3.3 golden-date 測試](../tests/invariant/test_m3_3_golden_dates.py)：日曆 764 開市／396 休市／0 unknown；1,962 個 instance。**已知限制**：TEJ 匯入以 (market, symbol) 去重，代號重用會被合併，已標為 strict xfail |
-| M3.4 每日股價與公司行動 | `pending` | 保留 `ohlc_state`、activity scope、公告／觀測時間及修訂；禁止推補 OHLC | price/action PIT tests |
+| M3.4 每日股價與公司行動 | `complete`（有已知缺口）| 保留 `ohlc_state`、activity scope、公告／觀測時間及修訂；禁止推補 OHLC | [M3.4 測試](../tests/invariant/test_m3_4_prices_actions.py)：daily_prices_pit 739,930 列／382 sessions；corporate_actions_pit 1,670 列。**已知缺口**：TWT49U 完全不提供公告日期，全部落入 first-observed-only；TPEx 行動尚未晉升 |
 | M3.5 市場狀態與財報 | `pending` | 納入停牌、處置、變更交易及 revision-safe 財報；缺覆蓋保持 unknown | cutoff/revision tests |
 | M3.6 As-of reconstruction | `pending` | 唯一查詢入口依 session 與 knowledge cutoff 回傳狀態、理由、lineage、coverage | anti-lookahead tests |
 | M3.7 重建與差異驗證 | `pending` | 重建可重現、受保護檔案不變、legacy 差異可解釋、restore 可行 | validation report |
@@ -151,21 +151,25 @@ reconstruct(as_of_session, decision_as_of, markets, security_types, dataset_id)
 - **兩市場交易日完全一致**（382 對 382，零分歧），D2 的共用行事曆政策得到實證支持；
 - **2026-07-10 兩市場休市但不在官方年度行事曆中**，證實禁止推算交易日曆的規定是必要的。
 
-### `supported` 仍為 0 的精確原因
+### 四項阻擋的最終處置（全部解除）
 
-| 阻擋資料族 | 影響 market-date | 解法 |
+| 阻擋資料族 | 影響 market-date | 處置 |
 |---|---:|---|
-| `market_status=current-only` | 764 | **無任何已批准來源** ⛔ |
-| `security_lifecycle=current-only` | 764 | TEJ 上市下市歷史（已批准，待匯入）|
-| `fundamental=partial` | 764 | TEJ 財報申報日（已批准，待匯入）|
-| `corporate_action=unknown` | 763 | 官方除權息歷史逐日抓取 |
+| `market_status` | 764 | ✅ M3.1d 抓取處置與注意（回溯至 2020），來源調查見 [市場狀態來源調查](evidence/m3-market-status-source-discovery-2026-08-16.md)；停牌依 D8 推定 |
+| `security_lifecycle` | 764 | ✅ M3.1c TEJ 上市下市歷史，覆蓋 96.2% |
+| `fundamental` | 764 | ✅ M3.1c TEJ 財報申報日 |
+| `corporate_action` | 763 | ✅ M3.1e（TWSE）與 M3.1f（TPEx MOPS 逐檔） |
+
+依 G0 v2.0.0 D9 計分，固定期間 **764 個交易日全部達 `supported`**。
 
 ### 待辦
 
-1. **需 Owner 決定**：歷史市場狀態（停牌／處置／注意／變更交易）從哪裡取得。現有 9 個來源全為 current-only，TEJ 已確認的模組不含此項。這是 M3 exit 的首要阻擋項。
-2. M3.1c：取得 TEJ 匯出檔後匯入三個模組。
-3. 擴充抓取工具涵蓋官方除權息歷史。
-4. 建立年度行事曆例行擷取，避免 2027 年重蹈 2025 年覆轍。
+1. M3.4–M3.5：建立 `daily_prices_pit`、`corporate_actions_pit`、`market_status_pit` 與 `fundamentals_pit`。
+2. M3.6：as-of 重建介面與 anti-lookahead 測試——**這才是驗證整批資料的關鍵**。
+3. M3.7–M3.8：重建決定性、legacy 差異、restore drill、Validation Owner 簽核。
+4. 修正 TEJ 匯入器的去重鍵（目前為 `(market, symbol)`，代號重用會被合併，已標 strict xfail）。
+5. 建立年度行事曆例行擷取，避免 2027 年重蹈 2025 年覆轍。
+6. 為日價以外的來源建立 quality policy，使其脫離 `gated-parse-only`。
 
-M3.2 啟動後仍不得使用舊 `ScreenerStore` 的 replace／overwrite 路徑。抓到資料**不等於**該日期成為 `supported`，仍須通過完整資料族 coverage 檢查。
+不得使用舊 `ScreenerStore` 的 replace／overwrite 路徑。抓到資料**不等於**該日期可供回測——M4 的交易規則與 M5 的帳本尚未完成。
 
