@@ -1,0 +1,53 @@
+{
+  "certificate_id": "tw-alpha-m3-coverage-ledger-20260816-03",
+  "generated_at": "2026-08-17T12:21:35.176022+00:00",
+  "inputs": {
+    "actions_capture": "C:\\project\\tw-sepa-screener\\data\\raw_v2\\m3_actions_2025-01-01_2026-08-03",
+    "status_capture": "C:\\project\\tw-sepa-screener\\data\\raw_v2\\m3_market_status_2025-01-01_2026-08-03",
+    "tej_lane": "C:\\project\\tw-sepa-screener\\data\\raw_v2\\m3_tej_licensed_2026-08-16",
+    "window_capture": "C:\\project\\tw-sepa-screener\\data\\raw_v2\\m3_window_2025-01-01_2026-08-03"
+  },
+  "ledger_path": "C:\\project\\tw-sepa-screener\\data\\raw_v2\\m3_coverage_ledger_2026-08-16-v3\\coverage_ledger.csv",
+  "ledger_sha256": "f606c09200ceaba14b15be4e616a01f09ead02e24d8467965582d5492e85e439",
+  "remaining_gaps": [
+    "TPEx corporate actions: no range-based official endpoint exists; the only historical route is MOPS per-symbol-per-year (~890 symbols x 2 years). TPEx therefore cannot reach `supported` under either scoring rule.",
+    "Suspension state rests on the D8 owner-approved inference, not on official evidence.",
+    "Security lifecycle and fundamentals rest on TEJ licensed-vendor evidence; a G0 amendment is required to decide whether that may satisfy `supported`."
+  ],
+  "row_count": 1160,
+  "schema_id": "tw-alpha-pit-coverage-certificate/1.0.0",
+  "scoring_note": "reconstruction_state uses official raw-v2 evidence only. reconstruction_state_if_vendor_accepted also counts TEJ licensed-vendor-snapshot evidence. Whether the latter may satisfy `supported` requires a G0 amendment by the Owner.",
+  "status": "gap-ledger-only-not-a-supported-date-certificate",
+  "strict_counts": {
+    "not-session": 396,
+    "partial": 764
+  },
+  "strict_partial_blocking_families": {
+    "corporate_action=unknown": 382,
+    "fundamental=licensed-vendor": 764,
+    "security_lifecycle=licensed-vendor": 764
+  },
+  "supersedes": "tw-alpha-m3-coverage-ledger-20260816-02",
+  "vendor_counts": {
+    "not-session": 396,
+    "partial": 382,
+    "supported": 382
+  },
+  "vendor_counts_by_market": {
+    "TPEX": {
+      "not-session": 198,
+      "partial": 382,
+      "supported": 0
+    },
+    "TWSE": {
+      "not-session": 198,
+      "partial": 0,
+      "supported": 382
+    }
+  },
+  "window": {
+    "calendar_dates": 580,
+    "end": "2026-08-03",
+    "start": "2025-01-01"
+  }
+}
