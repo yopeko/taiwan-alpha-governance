@@ -53,7 +53,7 @@ Owner 已於 2026-08-03 批准 [`G0-A-fixed-window-certified-dates`](evidence/m3
 | M3.1b 歷史抓取程式 | `complete` | 擴充抓取工具支援 TPEx 與任意日期範圍；抓取固定期間 TWSE／TPEx 日價；建立 TEJ licensed-vendor 匯入通道 | [M3.1b 完成證據](evidence/m3-1b-window-capture-2026-08-16.md)：1,160/1,160 零錯誤、耐久封存 tree `a07a4b5b…`、ledger v2 `unknown` 歸零 |
 | M3.1c TEJ 匯入 | `pending` | 匯入交易日曆、上市下市歷史、財報申報日 | 待 Owner 提供 TEJ 匯出檔；規格見 [TEJ 匯入規格](contracts/tej-import-spec.md) |
 | M3.2 Append-only staging | `pending` | 從通過 gate 的 observation 建立 lineage 完整的 staging；同輸入重建結果一致 | 已有 764 個交易日的日價輸入可用 |
-| M3.3 日曆與證券生命週期 | `pending` | 建立交易日狀態、上市／下市／更名／市場移轉與 `security_instance_id` | golden-date membership tests |
+| M3.3 日曆與證券生命週期 | `complete`（有已知限制）| 建立 trading_calendar_pit、security_events、security_intervals 與 security_instance_id | [M3.3 golden-date 測試](../tests/invariant/test_m3_3_golden_dates.py)：日曆 764 開市／396 休市／0 unknown；1,962 個 instance。**已知限制**：TEJ 匯入以 (market, symbol) 去重，代號重用會被合併，已標為 strict xfail |
 | M3.4 每日股價與公司行動 | `pending` | 保留 `ohlc_state`、activity scope、公告／觀測時間及修訂；禁止推補 OHLC | price/action PIT tests |
 | M3.5 市場狀態與財報 | `pending` | 納入停牌、處置、變更交易及 revision-safe 財報；缺覆蓋保持 unknown | cutoff/revision tests |
 | M3.6 As-of reconstruction | `pending` | 唯一查詢入口依 session 與 knowledge cutoff 回傳狀態、理由、lineage、coverage | anti-lookahead tests |
