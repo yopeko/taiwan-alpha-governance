@@ -27,6 +27,9 @@ from typing import Any, Mapping
 
 import requests
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
+
+from retry_policy import OFFICIAL_JSON, status_of  # noqa: E402
 from tw_sepa_screener.m2_daily_price_pilot import require_daily_price_output_root
 from tw_sepa_screener.raw_capture import RawCaptureStore
 from tw_sepa_screener.sources.captured_http import CapturedSession
@@ -114,11 +117,10 @@ def already_captured(root: Path) -> set[tuple[str, str]]:
 
 
 def retry_delay(response: requests.Response | None, attempt: int) -> float:
-    if response is not None:
-        value = response.headers.get("Retry-After")
-        if value and value.isdigit():
-            return min(float(value), 30.0)
-    return min(2.0 ** (attempt - 1), 10.0)
+    """Kept as a thin wrapper so the shared policy owns the actual decision."""
+
+    headers = response.headers if response is not None else None
+    return OFFICIAL_JSON.delay_for(attempt=attempt, headers=headers)
 
 
 def capture_one(
@@ -159,9 +161,9 @@ def capture_one(
             payload = client.get_market_day_payload(session_date)
         except requests.RequestException as exc:
             last_error = exc
-            status = exc.response.status_code if exc.response is not None else None
-            retryable = status is None or status == 429 or status >= 500
-            if not retryable or attempt == retry_limit:
+            if not OFFICIAL_JSON.should_retry(
+                attempt=attempt, status=status_of(exc)
+            ) or attempt == retry_limit:
                 return {
                     "outcome": "transport-error",
                     "attempts": attempt,

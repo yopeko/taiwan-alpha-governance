@@ -22,8 +22,10 @@ from typing import Any, Mapping
 import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
 
 from capture_window import protected_fingerprints  # noqa: E402
+from retry_policy import OFFICIAL_JSON, headers_of, status_of  # noqa: E402
 from market_status_sources import (  # noqa: E402
     SOURCE_SPECS,
     build_m3_registry,
@@ -117,15 +119,15 @@ def capture_chunk(
             response.encoding = "utf-8-sig"
             payload = response.json()
         except requests.RequestException as exc:
-            status = exc.response.status_code if exc.response is not None else None
-            retryable = status is None or status == 429 or status >= 500
-            if not retryable or attempt == retry_limit:
+            if not OFFICIAL_JSON.should_retry(
+                attempt=attempt, status=status_of(exc)
+            ) or attempt == retry_limit:
                 return {
                     "outcome": "transport-error",
                     "attempts": attempt,
                     "error": str(exc)[:200],
                 }
-            time.sleep(min(2.0 ** (attempt - 1), 10.0))
+            time.sleep(OFFICIAL_JSON.delay_for(attempt=attempt, headers=headers_of(exc)))
             continue
         except ValueError as exc:
             return {

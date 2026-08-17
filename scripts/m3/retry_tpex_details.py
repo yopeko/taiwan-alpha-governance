@@ -24,7 +24,9 @@ from typing import Any, Mapping
 import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
 
+from retry_policy import MOPS_HTML, headers_of, status_of  # noqa: E402
 from tw_sepa_screener.raw_capture import RawCaptureStore  # noqa: E402
 from tw_sepa_screener.sources.captured_http import CapturedSession  # noqa: E402
 from tw_sepa_screener.sources.mops_tpex_actions import BASE, _listing_rows  # noqa: E402
@@ -154,7 +156,7 @@ def main(argv: list[str] | None = None) -> int:
                     outcome = "captured"
                     break
                 except requests.RequestException:
-                    time.sleep(min(2.0 ** attempt, 30.0))
+                    time.sleep(MOPS_HTML.delay_for(attempt=attempt, headers=headers_of(exc)))
             results.append(
                 {
                     "symbol": symbol,

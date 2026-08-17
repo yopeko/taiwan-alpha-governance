@@ -24,8 +24,10 @@ from typing import Any, Mapping
 import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
 
 from capture_window import protected_fingerprints  # noqa: E402
+from retry_policy import MOPS_HTML, headers_of, status_of  # noqa: E402
 from tw_sepa_screener.m2_daily_price_pilot import (  # noqa: E402
     require_daily_price_output_root,
 )
@@ -108,15 +110,15 @@ def capture_symbol_year(
             listing_text = response.text
             break
         except requests.RequestException as exc:
-            status = exc.response.status_code if exc.response is not None else None
-            retryable = status is None or status == 429 or status >= 500
-            if not retryable or attempt == retry_limit:
+            if not MOPS_HTML.should_retry(
+                attempt=attempt, status=status_of(exc)
+            ) or attempt == retry_limit:
                 return {
                     "outcome": "list-transport-error",
                     "attempts": attempt,
                     "error": str(exc)[:160],
                 }
-            time.sleep(min(2.0 ** (attempt - 1), 15.0))
+            time.sleep(MOPS_HTML.delay_for(attempt=attempt, headers=headers_of(exc)))
     if listing_text is None:
         return {"outcome": "list-transport-error", "attempts": retry_limit}
 
