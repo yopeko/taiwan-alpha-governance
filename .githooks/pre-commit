@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Fast governance gate: the checks that must never be committed broken.
+#
+# Deliberately excludes tests/property, which rebuilds the staging layer twice
+# and takes well over a minute. Those run in CI and on demand. A hook slow
+# enough to be bypassed is a hook that gets bypassed.
+#
+# Install once:  git config core.hooksPath .githooks
+
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+PYTHON="${TW_ALPHA_PYTHON:-C:/project/tw-sepa-screener/.venv/Scripts/python.exe}"
+if [ ! -x "$PYTHON" ]; then
+  PYTHON="$(command -v python3 || command -v python || true)"
+fi
+if [ -z "$PYTHON" ]; then
+  echo "pre-commit: no python interpreter found; set TW_ALPHA_PYTHON" >&2
+  exit 1
+fi
+
+echo "pre-commit: M0 prohibitions, retry policy and M4 rules"
+PYTHONPATH="$REPO_ROOT" PYTHONIOENCODING=utf-8 \
+  "$PYTHON" -m pytest tests/unit tests/invariant m4/tests -q --no-header
+
+echo "pre-commit: refusing zip archives (licensed vendor exports)"
+if git diff --cached --name-only --diff-filter=A | grep -qiE '\.zip$'; then
+  echo "pre-commit: a .zip is staged. Licensed vendor exports must not be committed." >&2
+  exit 1
+fi
+
+echo "pre-commit: ok"

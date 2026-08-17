@@ -57,6 +57,7 @@ class TestProhibitionOverwriteProductionStores:
         assert not offenders, f"write call targets a protected store: {offenders}"
 
     def test_publication_guard_rejects_every_protected_path(self):
+        pytest.importorskip('tw_sepa_screener', reason='needs Taiwan Core checkout')
         from build_staging import PROTECTED_PATHS, StagingError, assert_publishable
 
         for protected in PROTECTED_PATHS:
@@ -64,6 +65,7 @@ class TestProhibitionOverwriteProductionStores:
                 assert_publishable(protected)
 
     def test_publication_guard_rejects_a_parent_of_a_protected_path(self):
+        pytest.importorskip('tw_sepa_screener', reason='needs Taiwan Core checkout')
         from build_staging import StagingError, assert_publishable
 
         with pytest.raises(StagingError):

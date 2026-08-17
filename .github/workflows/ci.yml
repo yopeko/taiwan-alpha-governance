@@ -1,0 +1,40 @@
+name: governance
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test dependencies
+        # The suite needs pyarrow and pandas for the lane assertions; the
+        # Taiwan Core package itself is not installable here, so the tests
+        # that need it skip by design.
+        run: python -m pip install --quiet pytest pyarrow pandas
+
+      - name: Run the environment-independent suite
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          PYTHONIOENCODING: utf-8
+        # Archives and the Taiwan Core checkout live only on the operator's
+        # machine, so a runner can only prove the static and pure-logic
+        # invariants. -ra lists exactly what skipped, so the boundary between
+        # "checked here" and "checked locally" stays visible rather than
+        # quietly shrinking.
+        run: python -m pytest -q -ra
+
+      - name: Fail if a licensed vendor export was committed
+        run: |
+          if git ls-files | grep -qiE '\.zip$'; then
+            echo "A .zip is tracked. Licensed vendor exports must not be committed."
+            exit 1
+          fi

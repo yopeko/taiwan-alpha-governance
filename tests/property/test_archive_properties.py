@@ -182,6 +182,7 @@ class TestStagingDeterminism:
     def test_two_builds_agree(self, tmp_path):
         if not all((RAW / name).is_dir() for name in ARCHIVES):
             pytest.skip("archives not present on this machine")
+        pytest.importorskip('tw_sepa_screener', reason='needs Taiwan Core checkout')
         from build_staging import build
 
         first = build(tmp_path / "a", limit_per_source=1)
@@ -197,6 +198,7 @@ class TestStagingDeterminism:
 
         if not all((RAW / name).is_dir() for name in ARCHIVES):
             pytest.skip("archives not present on this machine")
+        pytest.importorskip('tw_sepa_screener', reason='needs Taiwan Core checkout')
         import build_staging
 
         original = build_staging.SOURCE_MAP_VERSION
