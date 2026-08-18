@@ -22,6 +22,11 @@ TWSE_PUNISH_URL = "https://www.twse.com.tw/rwd/zh/announcement/punish"
 TWSE_NOTICE_URL = "https://www.twse.com.tw/rwd/zh/announcement/notice"
 TPEX_DISPOSAL_URL = "https://www.tpex.org.tw/www/zh-tw/bulletin/disposal"
 TPEX_ATTENTION_URL = "https://www.tpex.org.tw/www/zh-tw/bulletin/attention"
+# TWSE spells this path "reducation". Fifteen guesses at "reduction" all
+# returned the 747-byte error page; the real path was recovered from the page
+# source. Endpoint paths are extracted, never guessed.
+TWSE_REDUCTION_RESUME_URL = "https://www.twse.com.tw/rwd/zh/reducation/TWTAUU"
+TWSE_REDUCTION_FORECAST_URL = "https://www.twse.com.tw/rwd/zh/reducation/TWTAVU"
 
 M3_MARKET_STATUS_SOURCES = (
     RawSourceDefinition(
@@ -46,6 +51,20 @@ M3_MARKET_STATUS_SOURCES = (
         required_parameters=(("response", "json"),),
     ),
     RawSourceDefinition(
+        source_id="TWSE-REDUCTION-RESUME-HIST",
+        publisher="TWSE",
+        endpoint_id="capital-reduction-resumption-history",
+        url_prefixes=(TWSE_REDUCTION_RESUME_URL,),
+        required_parameters=(("response", "json"),),
+    ),
+    RawSourceDefinition(
+        source_id="TWSE-REDUCTION-FORECAST-HIST",
+        publisher="TWSE",
+        endpoint_id="capital-reduction-forecast-history",
+        url_prefixes=(TWSE_REDUCTION_FORECAST_URL,),
+        required_parameters=(("response", "json"),),
+    ),
+    RawSourceDefinition(
         source_id="TPEX-STATUS-ATTENTION-HIST",
         publisher="TPEX",
         endpoint_id="trading-status-attention-history",
@@ -63,6 +82,14 @@ SOURCE_SPECS: dict[str, dict[str, object]] = {
     "TWSE-STATUS-NOTICE-HIST": {"url": TWSE_NOTICE_URL, "calendar": "gregorian"},
     "TPEX-STATUS-DISPOSAL-HIST": {"url": TPEX_DISPOSAL_URL, "calendar": "roc"},
     "TPEX-STATUS-ATTENTION-HIST": {"url": TPEX_ATTENTION_URL, "calendar": "roc"},
+    "TWSE-REDUCTION-RESUME-HIST": {
+        "url": TWSE_REDUCTION_RESUME_URL,
+        "calendar": "gregorian",
+    },
+    "TWSE-REDUCTION-FORECAST-HIST": {
+        "url": TWSE_REDUCTION_FORECAST_URL,
+        "calendar": "gregorian",
+    },
 }
 
 
