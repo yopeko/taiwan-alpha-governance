@@ -39,6 +39,8 @@ ODD_LOT_MAX = 999
 
 PRICE_LIMIT_RATE = Decimal("0.10")
 SETTLEMENT_DAYS = 2
+# A newly listed security has no price limit for its first five sessions.
+NEW_LISTING_EXEMPT_SESSIONS = 5
 
 
 class Side(str, Enum):
@@ -154,6 +156,46 @@ def resolve_price_limits(
         )
     up, down = price_limits(reference_price)
     return up, down, "computed-standard-10pct"
+
+
+def sessions_since_listing(
+    listing_date: date, as_of_session: date, sessions: Sequence[date]
+) -> int | None:
+    """Trading sessions elapsed since listing, or None if unknowable."""
+
+    ordered = sorted(sessions)
+    try:
+        start = ordered.index(listing_date)
+        current = ordered.index(as_of_session)
+    except ValueError:
+        return None
+    return current - start
+
+
+def has_price_limit(
+    *,
+    listing_date: date | None,
+    as_of_session: date,
+    sessions: Sequence[date],
+) -> tuple[bool, str]:
+    """Whether the ordinary ten percent limit applies on this session.
+
+    A newly listed security trades without a price limit for its first five
+    sessions. Applying the limit anyway would reject orders the exchange would
+    have accepted, so a backtest would silently miss those fills.
+
+    Returns (applies, basis). An unknown listing date yields `blocked`: the
+    caller must not assume either answer.
+    """
+
+    if listing_date is None:
+        return False, "blocked-unknown-listing-date"
+    elapsed = sessions_since_listing(listing_date, as_of_session, sessions)
+    if elapsed is None:
+        return False, "blocked-session-not-in-calendar"
+    if elapsed < NEW_LISTING_EXEMPT_SESSIONS:
+        return False, "exempt-new-listing-first-five-sessions"
+    return True, "ordinary-ten-percent-limit"
 
 
 def classify_lot(quantity: int) -> LotType:

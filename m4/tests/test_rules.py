@@ -26,6 +26,7 @@ from m4.rules import (
     price_limits,
     resolve_price_limits,
     round_to_tick,
+    has_price_limit,
     settlement_date,
     tick_size,
     trade_costs,
@@ -279,3 +280,69 @@ class TestResolvePriceLimits:
     def test_ex_rights_without_published_limits_is_blocked(self):
         with pytest.raises(RuleError):
             resolve_price_limits(D("100"), is_ex_rights_session=True)
+
+
+class TestNewListingExemption:
+    """A newly listed security trades without a price limit for five sessions."""
+
+    SESSIONS = [date(2025, 1, d) for d in (2, 3, 6, 7, 8, 9, 10, 13, 14)]
+
+    def test_no_limit_on_the_listing_day(self):
+        applies, basis = has_price_limit(
+            listing_date=date(2025, 1, 2),
+            as_of_session=date(2025, 1, 2),
+            sessions=self.SESSIONS,
+        )
+        assert applies is False
+        assert basis == "exempt-new-listing-first-five-sessions"
+
+    def test_no_limit_on_the_fifth_session(self):
+        applies, _ = has_price_limit(
+            listing_date=date(2025, 1, 2),
+            as_of_session=date(2025, 1, 8),
+            sessions=self.SESSIONS,
+        )
+        assert applies is False
+
+    def test_limit_returns_on_the_sixth_session(self):
+        applies, basis = has_price_limit(
+            listing_date=date(2025, 1, 2),
+            as_of_session=date(2025, 1, 9),
+            sessions=self.SESSIONS,
+        )
+        assert applies is True
+        assert basis == "ordinary-ten-percent-limit"
+
+    def test_a_long_listed_security_has_the_ordinary_limit(self):
+        applies, _ = has_price_limit(
+            listing_date=date(2025, 1, 2),
+            as_of_session=date(2025, 1, 14),
+            sessions=self.SESSIONS,
+        )
+        assert applies is True
+
+    def test_unknown_listing_date_is_blocked_not_guessed(self):
+        applies, basis = has_price_limit(
+            listing_date=None,
+            as_of_session=date(2025, 1, 8),
+            sessions=self.SESSIONS,
+        )
+        assert applies is False
+        assert basis == "blocked-unknown-listing-date"
+
+    def test_a_session_outside_the_calendar_is_blocked(self):
+        applies, basis = has_price_limit(
+            listing_date=date(2025, 1, 2),
+            as_of_session=date(2025, 1, 4),
+            sessions=self.SESSIONS,
+        )
+        assert applies is False
+        assert basis == "blocked-session-not-in-calendar"
+
+    def test_exemption_counts_sessions_not_calendar_days(self):
+        # 1/2 to 1/9 is seven calendar days but five sessions.
+        from m4.rules import sessions_since_listing
+
+        assert sessions_since_listing(
+            date(2025, 1, 2), date(2025, 1, 9), self.SESSIONS
+        ) == 5
