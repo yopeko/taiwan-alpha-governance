@@ -62,6 +62,7 @@ Owner 已於 2026-08-03 批准 [`G0-A-fixed-window-certified-dates`](evidence/m3
 | M3.6 As-of reconstruction | `complete` | 唯一查詢入口依 session 與 knowledge cutoff 回傳狀態、理由、lineage、coverage | [anti-lookahead 測試](../tests/invariant/test_m3_6_anti_lookahead.py)：18 項通過，含 knowability 述詞、單調性、fail-closed、決定性。M0 禁令中的「未來資訊洩漏」已由 strict xfail 轉為實測 |
 | M3.7 重建與差異驗證 | `complete` | 重建可重現、受保護檔案不變、legacy 差異可解釋、restore 可行 | [驗證報告](evidence/m3-7-validation-2026-08-17.json)：五項全 `passed`；legacy 逐日列數**零差異**；restore 163 檔逐檔一致 |
 | M3.8 Exit review | `complete` | 檢查 G0 所選門檻、coverage、rollback、Validation Owner 簽核 | [Exit review 與簽核](evidence/m3-8-exit-review-2026-08-17.md)：Validation Owner 已簽核，附七項已記錄例外 |
+| M3.9 公司行動可用性 | `complete` | 以 TEJ 除息公告日補上官方事件的 `announced_at` | [M3.9 證據](evidence/m3-9-action-availability-2026-08-18.md)：2,279/2,388 取得 `publisher-exact`，as-of 可見度由 0 升至 2,279 |
 
 ## 5. 來源到 canonical table 的順序
 

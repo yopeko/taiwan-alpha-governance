@@ -22,7 +22,7 @@
 | 1 | 每個 calendar date 兩市場都有明確 certificate 狀態，無遺漏 | ✅ **1,160／1,160** |
 | 2 | 所有官方開市／特殊 session 為 `supported` | ✅ **764／764**（依 G0 v2.0.0 D9 計分）|
 | 3 | 官方休市日為有證據的 `not-session` | ✅ **396／396** |
-| 4 | `supported` 日期的生命週期、價格、狀態、行動、財報符合 PIT／revision／lineage 規則 | ⚠️ **部分**——四族符合，公司行動不符（見 §4）|
+| 4 | `supported` 日期的生命週期、價格、狀態、行動、財報符合 PIT／revision／lineage 規則 | ⚠️ **大部分**——五族符合；公司行動於 2026-08-18 由 [M3.9](m3-9-action-availability-2026-08-18.md) 補上公告日，2,279/2,388 可用，餘 109 筆仍不可 as-of |
 | 5 | anti-lookahead、deterministic rebuild、protected-store non-mutation、restore、Validation Owner 簽核 | ✅ 全部通過 |
 
 ---
@@ -51,7 +51,10 @@
 
 ---
 
-## 4. 條件 4 的例外：公司行動無法參與 as-of
+## 4. 條件 4 的例外：公司行動（已於 M3.9 大幅解除）
+
+> **2026-08-18 更新**：本節描述的是簽核當下的狀態。TEJ 現金股息匯出已補上公告日期，2,279/2,388 筆（95.4%）現可用於 as-of，詳見 [M3.9](m3-9-action-availability-2026-08-18.md)。以下保留原始記錄不回寫。
+
 
 `corporate_actions_pit` 的 1,670 列**全部缺公告日期**，因為 TWT49U 端點不提供。依 availability policy 只能落入 `first-observed-only`，而首次觀測為 2026 年，晚於固定期間內每一個日期。
 
@@ -77,7 +80,7 @@ TPEx 公司行動另有一層：已抓取 2,313 筆但尚未晉升至 canonical 
 
 ### 本簽核**不**確認
 
-- 公司行動可用於 as-of 重建（見 §4）；
+- 公司行動**全部**可用於 as-of 重建——M3.9 後 2,279/2,388 可用，109 筆 TEJ 未涵蓋者仍不可用；
 - 逐筆價格值與 legacy 或官方原始值一致（僅比對列數）；
 - 停牌狀態有官方證據（依 D8 推定，`owner-approved-policy`）；
 - 代號重用可正確分辨（TEJ 去重鍵缺陷，strict xfail）；
@@ -90,7 +93,7 @@ TPEx 公司行動另有一層：已抓取 2,313 筆但尚未晉升至 canonical 
 
 | # | 例外 | 固定方式 |
 |---|---|---|
-| 1 | TWT49U 無公告日期，公司行動不可 as-of | 測試斷言 `availability_basis` 恆為 `first-observed-only` |
+| 1 | ~~TWT49U 無公告日期~~ **已於 2026-08-18 大幅解除**：TEJ 現金股息提供公告日，2,388 筆官方事件中 2,279 筆（95.4%）取得 `publisher-exact`，餘 109 筆 TEJ 未涵蓋者維持 `first-observed-only`。見 [M3.9 證據](m3-9-action-availability-2026-08-18.md) |
 | 2 | TPEx 公司行動未晉升 canonical 表 | strict xfail |
 | 3 | TEJ 去重鍵為 `(market, symbol)`，代號重用被合併 | strict xfail |
 | 4 | 停牌依 D8 價格缺漏推定 | 契約記錄＋reason code `suspension-inferred-from-price-absence` |

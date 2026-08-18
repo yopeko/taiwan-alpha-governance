@@ -71,6 +71,7 @@ AlphaMaster 不得直接寫入正式策略、紙上帳本或真實委託；AI �
 - [M3.1f TPEx 公司行動與 coverage ledger v4](docs/evidence/m3-1f-tpex-actions-and-ledger-v4-2026-08-16.md)
 - [M3.2 Append-only staging](docs/evidence/m3-2-staging-2026-08-16.md)
 - [M3.8 Exit review 與 Validation Owner 簽核](docs/evidence/m3-8-exit-review-2026-08-17.md)
+- [M3.9 公司行動取得公告日期](docs/evidence/m3-9-action-availability-2026-08-18.md)
 - [M4 台股規則與成本契約](docs/contracts/m4-market-rules-contract.md)
 
 ## 已凍結的 M0 基線
@@ -120,7 +121,7 @@ M3.0 至 M3.8 全部 `complete`，Validation Owner 已於 2026-08-17 簽核。�
 
 | # | 例外 |
 |---|---|
-| 1 | TWT49U 無公告日期，公司行動**無法用於 as-of 查詢** |
+| 1 | ~~TWT49U 無公告日期~~ **2026-08-18 大幅解除**：2,279/2,388（95.4%）取得公告日，as-of 可見度由 0 升至 2,279；餘 109 筆 TEJ 未涵蓋 |
 | 2 | TPEx 公司行動尚未晉升 canonical 表 |
 | 3 | TEJ 去重鍵為 `(market, symbol)`，代號重用被合併 |
 | 4 | 停牌依 D8 價格缺漏推定，非官方證據 |
