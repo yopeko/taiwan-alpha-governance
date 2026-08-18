@@ -155,7 +155,7 @@ def main(argv: list[str] | None = None) -> int:
                     response.raise_for_status()
                     outcome = "captured"
                     break
-                except requests.RequestException:
+                except requests.RequestException as exc:
                     time.sleep(MOPS_HTML.delay_for(attempt=attempt, headers=headers_of(exc)))
             results.append(
                 {

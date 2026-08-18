@@ -228,14 +228,40 @@ class TestProhibitionUndocumentedAdjustedPrices:
         )
 
 
-@pytest.mark.xfail(
-    reason="requires the M3.6 as-of query interface, which is not built yet",
-    strict=True,
-)
 def test_no_future_information_leaks_into_an_earlier_cutoff():
-    from m3_asof import reconstruct  # noqa: F401
+    """M0 section 4.3: information may not be used before it was available.
 
-    raise AssertionError("unreachable until M3.6 exists")
+    Previously xfail pending M3.6. The as-of interface now exists, so this is
+    a live check: reconstructing a session with a same-day cutoff must never
+    report a restriction that was only announced afterwards.
+    """
+
+    pytest.importorskip("pyarrow")
+    try:
+        from asof import _iso, default_warehouse
+    except Exception as exc:  # noqa: BLE001
+        pytest.skip(f"warehouse not available: {exc}")
+
+    warehouse = default_warehouse()
+    session = cutoff = "2025-06-16"
+    result = warehouse.reconstruct(as_of_session=session, decision_as_of=cutoff)
+    flagged = {
+        s.symbol
+        for s in result.securities
+        if s.market_status_state not in {"no-event-in-covered-window", "no-coverage"}
+    }
+    # Only a row that actually covers this session could have influenced the
+    # answer. A symbol may legitimately carry a later, unrelated announcement.
+    leaks = []
+    for row in warehouse._status:
+        if str(row.get("symbol")) not in flagged:
+            continue
+        announced = _iso(row.get("announced_at"))
+        start, end = _iso(row.get("effective_from")), _iso(row.get("effective_to"))
+        covers = (start <= session <= end) if start and end else announced == session
+        if covers and announced > cutoff:
+            leaks.append((row.get("symbol"), announced))
+    assert not leaks, f"future-announced status leaked into an earlier cutoff: {leaks[:5]}"
 
 
 @pytest.mark.xfail(
