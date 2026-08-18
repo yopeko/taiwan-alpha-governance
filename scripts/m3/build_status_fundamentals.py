@@ -33,6 +33,10 @@ RAW = Path(r"C:\project\tw-sepa-screener\data\raw_v2")
 TEJ_LANE = RAW / "m3_tej_licensed_2026-08-16"
 WINDOW = (date(2025, 1, 1), date(2026, 8, 3))
 
+REDUCTION_SOURCES = {
+    "TWSE-REDUCTION-RESUME-HIST",
+    "TWSE-REDUCTION-FORECAST-HIST",
+}
 STATUS_SOURCES = {
     "TWSE-STATUS-PUNISH-HIST",
     "TWSE-STATUS-NOTICE-HIST",
@@ -79,6 +83,34 @@ def pick(row: dict[str, Any], *names: str) -> Any:
         if name in row and row[name] not in (None, ""):
             return row[name]
     return None
+
+
+def collapse_duplicates(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One row per event, regardless of how many archives carried it.
+
+    The status capture and the reduction capture both requested every
+    registered source, so the same disposal or attention notice is present in
+    two archives. Counting it twice would double every statistic built on this
+    table. The key is the event itself, never the archive that carried it.
+    """
+
+    unique: dict[str, dict[str, Any]] = {}
+    for row in events:
+        key = sha(
+            {
+                field: str(row[field])
+                for field in (
+                    "market",
+                    "symbol",
+                    "event_kind",
+                    "effective_from",
+                    "effective_to",
+                    "announced_at",
+                )
+            }
+        )
+        unique.setdefault(key, row)
+    return list(unique.values())
 
 
 def build_status(index, manifests):
@@ -134,9 +166,111 @@ def build_status(index, manifests):
         row["record_id"] = sha(
             {k: str(row[k]) for k in ("market", "symbol", "event_kind", "effective_from", "snapshot_id")}
         )
+    events = collapse_duplicates(events)
+    seen: set[tuple] = set()
+    deduped_coverage = []
+    for item in coverage:
+        key = (
+            item["market"],
+            item["source_id"],
+            item["coverage_from"],
+            item["coverage_to"],
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped_coverage.append(item)
+    coverage = deduped_coverage
     events.sort(key=lambda r: (r["effective_from"] or r["announced_at"], r["market"], str(r["symbol"])))
     coverage.sort(key=lambda r: (r["market"], r["source_id"], r["coverage_from"]))
     return events, coverage
+
+
+def _detail_announcement(row: dict) -> str:
+    """Pull the publication date out of the forecast detail link parameter.
+
+    The forecast row carries no announcement column; its detail link is
+    formatted `symbol,YYYYMMDD` where the date is when the forecast was
+    published. Nothing else in the row states when the reduction became
+    knowable, so this is the only defensible source for it.
+    """
+
+    import json as _json
+    import re as _re
+
+    raw = row.get("source_record_json") or ""
+    try:
+        cells = _json.loads(raw)
+    except (ValueError, TypeError):
+        return ""
+    for cell in cells:
+        match = _re.fullmatch(r"\s*\d{4,6}\s*,\s*(\d{8})\s*", str(cell))
+        if match:
+            digits = match.group(1)
+            return f"{digits[:4]}-{digits[4:6]}-{digits[6:8]}"
+    return ""
+
+
+def build_reductions(index, manifests):
+    """Reduction rows as market-status intervals, keyed by resumption date."""
+
+    forecasts: dict[tuple[str, str], str] = {}
+    raw_rows: list[dict] = []
+    for record in index:
+        if record["source_id"] not in REDUCTION_SOURCES:
+            continue
+        manifest_path = manifests.get(record["parse_run_id"])
+        if manifest_path is None:
+            continue
+        for row in rows_of(manifest_path):
+            row["_record"] = record
+            raw_rows.append(row)
+            if row.get("record_kind") == "forecast":
+                announced = _detail_announcement(row)
+                if announced and row.get("resumption_date"):
+                    forecasts[(str(row["symbol"]), str(row["resumption_date"]))] = announced
+
+    events: list[dict] = []
+    for row in raw_rows:
+        if row.get("record_kind") != "resumption":
+            continue
+        record = row["_record"]
+        symbol = str(row["symbol"])
+        resumption = str(row.get("resumption_date") or "")
+        announced = forecasts.get((symbol, resumption), "")
+        events.append(
+            {
+                "market": "TWSE",
+                "symbol": symbol,
+                "event_kind": "capital-reduction",
+                "announced_at": announced,
+                # Trading is halted up to the day before it resumes.
+                "effective_from": str(row.get("halt_date") or ""),
+                "effective_to": resumption,
+                "altered_trading": False,
+                "reason_text": str(row.get("reduction_reason") or "")[:400],
+                "measure_text": (
+                    f"prior_close={row.get('prior_close')} "
+                    f"resumption_reference={row.get('resumption_reference_price')} "
+                    f"limit_up={row.get('limit_up')} limit_down={row.get('limit_down')}"
+                )[:400],
+                "availability_basis": (
+                    "publisher-exact" if announced else "unknown-blocked"
+                ),
+                "source_id": record["source_id"],
+                "snapshot_id": record["snapshot_id"],
+                "parse_run_id": record["parse_run_id"],
+                "evidence_tier": record["evidence_tier"],
+                "evidence_state": "verified-snapshot",
+                "source_row_ordinal": int(row.get("source_row_ordinal") or 0),
+            }
+        )
+    for row in events:
+        row["record_id"] = sha(
+            {k: str(row[k]) for k in ("market", "symbol", "event_kind", "effective_to", "snapshot_id")}
+        )
+    events.sort(key=lambda r: (r["effective_to"], r["symbol"]))
+    return events
 
 
 def tej_announcements() -> dict[tuple[str, str], str]:
@@ -223,6 +357,11 @@ def build(staging_root: Path, out_root: Path) -> dict[str, Any]:
     manifests = manifest_index(staging_root)
 
     events, coverage = build_status(index, manifests)
+    reductions = build_reductions(index, manifests)
+    events = sorted(
+        events + reductions,
+        key=lambda r: (r['effective_from'] or r['announced_at'], r['market'], str(r['symbol'])),
+    )
     announcements = tej_announcements()
     fundamentals, basis_counts = build_fundamentals(index, manifests, announcements)
 
@@ -241,6 +380,14 @@ def build(staging_root: Path, out_root: Path) -> dict[str, Any]:
             },
             "altered_trading_rows": sum(1 for e in events if e["altered_trading"]),
             "with_announcement_date": sum(1 for e in events if e["announced_at"]),
+            "capital_reduction_rows": sum(
+                1 for e in events if e["event_kind"] == "capital-reduction"
+            ),
+            "capital_reduction_with_announcement": sum(
+                1
+                for e in events
+                if e["event_kind"] == "capital-reduction" and e["announced_at"]
+            ),
             "distinct_symbols": len({(e["market"], e["symbol"]) for e in events}),
         },
         "market_status_coverage": {

@@ -55,6 +55,7 @@ ARCHIVES = (
     RAW / "m3_market_status_2025-01-01_2026-08-03",
     RAW / "m3_actions_2025-01-01_2026-08-03",
     RAW / "m3_tpex_actions_2024-2026",
+    RAW / "m3_reduction_2025-01-01_2026-08-03",
 )
 
 # Publishing anywhere at or inside these is forbidden.
