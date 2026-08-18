@@ -114,3 +114,24 @@ def test_no_index_still_advertises_a_resolved_blocker():
     text = index_text()
     stale = [phrase for phrase in resolved_phrases if phrase in text]
     assert not stale, f"index still advertises a resolved blocker: {stale}"
+
+
+def test_no_index_narrative_contradicts_a_completed_milestone():
+    """A finished milestone must not still be described as unfinished.
+
+    The status table and the narrative section are edited separately, so they
+    drift apart exactly when a milestone lands. This caught README describing
+    M3 conditions 4-5 as "not yet started" after they had both passed.
+    """
+
+    if not README.is_file():
+        pytest.skip("README not present")
+    text = README.read_text(encoding="utf-8")
+    if "| M3 Point-in-time warehouse | complete" not in text:
+        pytest.skip("M3 not marked complete")
+    stale = [
+        phrase
+        for phrase in ("條件 4–5 尚未開始", "尚未開始", "倉庫未驗", "抓取階段結束")
+        if phrase in text
+    ]
+    assert not stale, f"README still describes finished M3 work as pending: {stale}"

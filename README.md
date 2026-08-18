@@ -97,27 +97,39 @@ M2 只能建立官方不可變原始資料層及其追溯驗收。M0/M1/M2 不�
 - 使用 NT$10,000 進行真實交易；
 - 將任何 AlphaMaster 因子宣稱為已驗證台股策略。
 
-## M3 目前狀態（2026-08-17 更新）
+## M3 完成狀態（2026-08-17）
 
-M3.0 至 M3.3 皆已 `complete`，抓取階段結束。
-
-G0 於 2026-08-03 批准固定期間 2025-01-01 至 2026-08-03；2026-08-16 以 **G0 v2.0.0** 修訂，批准 TEJ `licensed-vendor-snapshot` 證據可計入 `supported`，附六項強制條件（lane 不變、官方優先、可追溯、可分離重跑、雙軌計分保留、僅限已批准模組）。
+M3.0 至 M3.8 全部 `complete`，Validation Owner 已於 2026-08-17 簽核。完整核對見 [Exit review](docs/evidence/m3-8-exit-review-2026-08-17.md)。
 
 **Coverage ledger v4**（1,160 個 market-date）：
 
-| State | 嚴格（僅官方）| 依 D9（含授權廠商）|
+| State | 嚴格（僅官方）| 依 G0 v2.0.0 D9（含授權廠商）|
 |---|---:|---:|
 | `supported` | 0 | **764** |
 | `not-session` | 396 | 396 |
 | `partial` | 764 | **0** |
 | `unknown` | 0 | **0** |
 
-嚴格計分下僅剩 `security_lifecycle` 與 `fundamental` 的授權廠商依賴，這正是 D9 批准的範圍。
+**G0 §5 退出條件**：條件 1、2、3、5 全部通過；**條件 4 部分通過**——生命週期、價格、市場狀態、財報四族符合 PIT 規則，公司行動不符。
 
-**已建立的資料層**：M3.2 staging 6,144 觀測／850,071 列，dataset_id 內容定址且重建逐檔一致；M3.3 三張 PIT 表（`trading_calendar_pit` 1,160 列、`security_events` 1,975 列、`security_intervals` 1,962 個 instance）並通過 golden-date 測試。
+**M3.7 驗證**：五項全 `passed`。staging 與三組 canonical 表重建逐檔一致；restore drill 163 檔相同；受保護 stores 未變動；legacy 逐日列數**零差異**（2025-01-02、2025-10-17、2026-08-03 各 1,878／1,920／1,982 完全相符）。
 
-**G0 §5 退出條件**：條件 1–3（coverage）已滿足；**條件 4–5 尚未開始**——`supported` 日期的 PIT／revision／lineage 規則未驗證，anti-lookahead、deterministic rebuild、restore 與 Validation Owner 簽核未執行，屬 M3.4–M3.8。
+**M3.6 as-of 介面**：18 項 anti-lookahead 測試通過，含 knowability 述詞、限制單調性、fail-closed 與決定性。
 
-因此 M3 的正確狀態是「**資料齊全，倉庫未驗**」。抓到全部原始資料不等於能在指定 cutoff 正確重建當時狀態。
+### 七項已記錄例外
 
-所有 M3 產物仍落在獨立 shadow；缺資料保持 `unknown` 或 `blocked`，不得用今日狀態、事後修訂或 legacy 資料補成歷史真相。
+| # | 例外 |
+|---|---|
+| 1 | TWT49U 無公告日期，公司行動**無法用於 as-of 查詢** |
+| 2 | TPEx 公司行動尚未晉升 canonical 表 |
+| 3 | TEJ 去重鍵為 `(market, symbol)`，代號重用被合併 |
+| 4 | 停牌依 D8 價格缺漏推定，非官方證據 |
+| 5 | 34 個來源無 quality policy，停在 `gated-parse-only` |
+| 6 | 34 檔證券因來源缺市場別被拒 |
+| 7 | 2025 年官方行事曆已永久不可得，改依 TEJ |
+
+全部有測試盯著；補上來源時測試會失敗並提醒更新。
+
+### M3 完成不代表
+
+資料可用於正式回測（M4 交易規則、M5 帳本未完成）、production cutover 已批准（仍需 G4）、或 2026-08-04 以後的日期受到承諾。所有 M3 產物仍落在獨立 shadow。
