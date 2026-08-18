@@ -293,9 +293,178 @@ M3_MARKET_STATUS_PARSERS: tuple[ParserDefinition, ...] = (
 )
 
 
+REDUCTION_SCHEMA = pa.schema(
+    [
+        pa.field("market", pa.string(), nullable=False),
+        pa.field("record_kind", pa.string(), nullable=False),
+        pa.field("symbol", pa.string(), nullable=False),
+        pa.field("security_name", pa.string(), nullable=True),
+        pa.field("halt_date", pa.date32(), nullable=True),
+        pa.field("resumption_date", pa.date32(), nullable=True),
+        pa.field("prior_close", pa.string(), nullable=True),
+        pa.field("resumption_reference_price", pa.string(), nullable=True),
+        pa.field("limit_up", pa.string(), nullable=True),
+        pa.field("limit_down", pa.string(), nullable=True),
+        pa.field("reduction_reason", pa.string(), nullable=True),
+        pa.field("exchange_ratio", pa.string(), nullable=True),
+        pa.field("cash_returned_per_share", pa.string(), nullable=True),
+        pa.field("source_row_ordinal", pa.int32(), nullable=False),
+        pa.field("source_record_json", pa.string(), nullable=False),
+    ]
+)
+
+
+def _build_reduction_parse_fn(record_kind: str):
+    """Parse the capital-reduction resumption and forecast tables.
+
+    Both publish the prior close alongside the resumption reference price, so
+    the adjustment ratio is stated by the exchange rather than inferred from a
+    price gap — which the PIT contract forbids inferring.
+
+    The forecast table is announced before the halt, so it carries the dates
+    that make a reduction knowable in advance; the resumption table states
+    what actually happened. They are kept as separate `record_kind` values
+    rather than merged, because one is a plan and the other is an outcome.
+    """
+
+    def parse_fn(payload, _raw_manifest, _config) -> ParseBatch:
+        document = json.loads(payload.decode("utf-8-sig"))
+        rows: list[dict] = []
+        rejects: list[dict] = []
+        ordinal = 0
+        for fields, data in _tables(document):
+            names = [str(f) for f in fields]
+            i_sym = _index_of(names, "股票代號")
+            i_name = _index_of(names, "名稱")
+            i_halt = _index_of(names, "停止買賣日期")
+            i_resume = _index_of(names, "恢復買賣日期")
+            i_prev = _index_of(names, "停止買賣前收盤價格")
+            i_ref = _index_of(names, "恢復買賣參考價")
+            i_up = _index_of(names, "漲停價格")
+            i_down = _index_of(names, "跌停價格")
+            i_why = _index_of(names, "減資原因")
+            i_ratio = _index_of(names, "減資換股率")
+            i_cash = _index_of(names, "每股退還股款")
+
+            for raw_row in data:
+                ordinal += 1
+                record = json.dumps(raw_row, ensure_ascii=False)
+
+                def cell(idx):
+                    if idx is None or len(raw_row) <= idx:
+                        return None
+                    return _clean(raw_row[idx])
+
+                def price(idx):
+                    """Numeric cells only.
+
+                    The forecast table reuses the column name
+                    恢復買賣參考價 for a link parameter string such as
+                    "1563,20260818,20260907". Accepting it would put a
+                    fake price into the table under a real price name.
+                    """
+
+                    value = cell(idx)
+                    if value is None:
+                        return None
+                    # Strict decimal only. Stripping separators first would
+                    # turn "1563,20260818,20260907" into a valid float.
+                    if not re.fullmatch(r"[0-9]{1,7}(\.[0-9]{1,4})?", value):
+                        return None
+                    return value
+
+                def day(idx):
+                    if idx is None or len(raw_row) <= idx:
+                        return None
+                    return _roc_or_iso(raw_row[idx])
+
+                symbol = cell(i_sym)
+                if not symbol or not symbol[:4].isdigit():
+                    rejects.append(
+                        {
+                            "source_row_ordinal": ordinal,
+                            "reject_reason": "row-has-no-security-code",
+                            "source_record_json": record,
+                        }
+                    )
+                    continue
+                rows.append(
+                    {
+                        "market": "TWSE",
+                        "record_kind": record_kind,
+                        "symbol": symbol[:6],
+                        "security_name": cell(i_name),
+                        "halt_date": day(i_halt),
+                        "resumption_date": day(i_resume),
+                        "prior_close": price(i_prev),
+                        "resumption_reference_price": price(i_ref),
+                        "limit_up": price(i_up),
+                        "limit_down": price(i_down),
+                        "reduction_reason": cell(i_why),
+                        "exchange_ratio": cell(i_ratio),
+                        "cash_returned_per_share": price(i_cash),
+                        "source_row_ordinal": ordinal,
+                        "source_record_json": record,
+                    }
+                )
+        rows.sort(key=lambda r: (r["symbol"], r["source_row_ordinal"]))
+        return ParseBatch(
+            rows=pa.Table.from_pylist(rows, schema=REDUCTION_SCHEMA),
+            rejects=pa.Table.from_pylist(rejects, schema=REJECT_SCHEMA)
+            if rejects
+            else None,
+            diagnostics={
+                "parser_contract": PARSER_CONTRACT,
+                "row_count": len(rows),
+                "reject_count": len(rejects),
+            },
+        )
+
+    return parse_fn
+
+
+def _reduction_definition(
+    parser_id: str, source_id: str, endpoint_id: str, record_kind: str
+) -> ParserDefinition:
+    return ParserDefinition(
+        parser_id=parser_id,
+        source_ids=(source_id,),
+        endpoint_ids=(endpoint_id,),
+        output_schema=REDUCTION_SCHEMA,
+        primary_key=("market", "record_kind", "symbol", "source_row_ordinal"),
+        sort_keys=("market", "record_kind", "symbol", "source_row_ordinal"),
+        parse_fn=_build_reduction_parse_fn(record_kind),
+        code_resources=(_CODE_RESOURCE,),
+        default_config={
+            "parser_contract": PARSER_CONTRACT,
+            "security_scope": "four-digit-common-stock-v1",
+            "missing_value_policy": "preserved-not-filled",
+            "record_preservation": "canonical-source-record-json",
+        },
+    )
+
+
+M3_REDUCTION_PARSERS: tuple[ParserDefinition, ...] = (
+    _reduction_definition(
+        "twse-capital-reduction-resumption/1",
+        "TWSE-REDUCTION-RESUME-HIST",
+        "capital-reduction-resumption-history",
+        "resumption",
+    ),
+    _reduction_definition(
+        "twse-capital-reduction-forecast/1",
+        "TWSE-REDUCTION-FORECAST-HIST",
+        "capital-reduction-forecast-history",
+        "forecast",
+    ),
+)
+
+
 def build_m3_parser_registry() -> ParserRegistry:
     """P0 formal parsers plus the M3 market-status parsers."""
 
     return ParserRegistry(
-        tuple(P0_FORMAL_PARSER_DEFINITIONS) + M3_MARKET_STATUS_PARSERS
+        tuple(P0_FORMAL_PARSER_DEFINITIONS)
+        + M3_MARKET_STATUS_PARSERS
+        + M3_REDUCTION_PARSERS
     )
