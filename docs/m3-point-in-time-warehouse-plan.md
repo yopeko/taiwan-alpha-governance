@@ -5,11 +5,11 @@
 | 欄位 | 值 |
 |---|---|
 | Plan ID | `tw-alpha-m3-plan-v0.3.0` |
-| 狀態 | `in_progress` |
+| 狀態 | `complete`（附七項已記錄例外）|
 | 進場日期 | 2026-08-03 |
 | 前置里程碑 | M0、M1、M2 `complete` |
 | 本階段輸出 | 獨立、可回復、不可覆寫正式資料的 point-in-time shadow warehouse |
-| 目前工作包 | M3.7 重建與差異驗證（M3.0–M3.6 已 complete）|
+| 目前工作包 | 無；M3.0–M3.8 全部 complete。下一里程碑為 M4 |
 | 最後更新 | 2026-08-17 |
 
 M3 的目的不是先做選股，而是回答一個較基本的問題：在某個歷史決策時間，系統當時真正知道哪些股票、交易日、價格、交易狀態、公司行動及財務資訊。
@@ -60,8 +60,8 @@ Owner 已於 2026-08-03 批准 [`G0-A-fixed-window-certified-dates`](evidence/m3
 | M3.4 每日股價與公司行動 | `complete`（有已知缺口）| 保留 `ohlc_state`、activity scope、公告／觀測時間及修訂；禁止推補 OHLC | [M3.4 測試](../tests/invariant/test_m3_4_prices_actions.py)：daily_prices_pit 739,930 列／382 sessions；corporate_actions_pit 1,670 列。**已知缺口**：TWT49U 完全不提供公告日期，全部落入 first-observed-only；TPEx 行動尚未晉升 |
 | M3.5 市場狀態與財報 | `complete`（停牌除外）| 納入停牌、處置、變更交易及 revision-safe 財報；缺覆蓋保持 unknown | [M3.5 測試](../tests/invariant/test_m3_5_status_fundamentals.py)：market_status_pit 15,574 列（全具公告日）＋63 段 coverage interval；fundamentals_pit 3,833 列，98.8% 為 publisher-exact。**停牌不在表中**，無官方歷史來源，依 D8 推定 |
 | M3.6 As-of reconstruction | `complete` | 唯一查詢入口依 session 與 knowledge cutoff 回傳狀態、理由、lineage、coverage | [anti-lookahead 測試](../tests/invariant/test_m3_6_anti_lookahead.py)：18 項通過，含 knowability 述詞、單調性、fail-closed、決定性。M0 禁令中的「未來資訊洩漏」已由 strict xfail 轉為實測 |
-| M3.7 重建與差異驗證 | `pending` | 重建可重現、受保護檔案不變、legacy 差異可解釋、restore 可行 | validation report |
-| M3.8 Exit review | `pending` | 檢查 G0 所選門檻、coverage、rollback、Validation Owner 簽核 | M3 exit evidence |
+| M3.7 重建與差異驗證 | `complete` | 重建可重現、受保護檔案不變、legacy 差異可解釋、restore 可行 | [驗證報告](evidence/m3-7-validation-2026-08-17.json)：五項全 `passed`；legacy 逐日列數**零差異**；restore 163 檔逐檔一致 |
+| M3.8 Exit review | `complete` | 檢查 G0 所選門檻、coverage、rollback、Validation Owner 簽核 | [Exit review 與簽核](evidence/m3-8-exit-review-2026-08-17.md)：Validation Owner 已簽核，附七項已記錄例外 |
 
 ## 5. 來源到 canonical table 的順序
 

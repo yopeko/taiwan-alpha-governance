@@ -9,7 +9,7 @@
 | M0 證據與市場契約 | complete | 2026-08-02 | [M0 專案契約](docs/m0-project-contract.md) |
 | M1 架構與重用稽核 | complete | 2026-08-02 | [M1 架構與重用稽核](docs/m1-architecture-reuse-audit.md) |
 | M2 官方不可變原始資料 | complete | 2026-08-03 | 36 sources、56 live observations、55 initial accepted + 1 released quarantine、0 unresolved；正式封存與 E: 備份均通過稽核。[M2 closure evidence](docs/evidence/m2-owner-approvals-release-and-durable-audit-2026-08-03.md) |
-| M3 Point-in-time warehouse | in progress | - | M3.0–M3.3 complete；抓取階段結束。依 G0 v2.0.0 計分：supported 764／not-session 396／partial 0／unknown 0。剩 M3.4–M3.8。[M3 計畫](docs/m3-point-in-time-warehouse-plan.md)、[ledger v4 證據](docs/evidence/m3-1f-tpex-actions-and-ledger-v4-2026-08-16.md) |
+| M3 Point-in-time warehouse | complete（附七項已記錄例外）| 2026-08-17 | G0 §5 條件 1、2、3、5 通過，條件 4 部分通過。Validation Owner 已簽核。[Exit review](docs/evidence/m3-8-exit-review-2026-08-17.md)、[M3 計畫](docs/m3-point-in-time-warehouse-plan.md) |
 | M4 台股規則與成本 | in progress | - | 參考實作與 50 項測試完成；檔位由 406,445 筆官方收盤價實測推導。剩除權息日漲跌停公式、減資、新上市前五日與上游化。[M4 契約](docs/contracts/m4-market-rules-contract.md) |
 
 詳細狀態及退出門檻見 [里程碑登錄表](docs/milestone-register.md)。
@@ -70,6 +70,7 @@ AlphaMaster 不得直接寫入正式策略、紙上帳本或真實委託；AI �
 - [M3 G0 修訂 v2.0.0 與決定 D9–D10](docs/evidence/m3-g0-amendment-d9-d10-2026-08-16.md)
 - [M3.1f TPEx 公司行動與 coverage ledger v4](docs/evidence/m3-1f-tpex-actions-and-ledger-v4-2026-08-16.md)
 - [M3.2 Append-only staging](docs/evidence/m3-2-staging-2026-08-16.md)
+- [M3.8 Exit review 與 Validation Owner 簽核](docs/evidence/m3-8-exit-review-2026-08-17.md)
 - [M4 台股規則與成本契約](docs/contracts/m4-market-rules-contract.md)
 
 ## 已凍結的 M0 基線

@@ -1,0 +1,95 @@
+{
+  "checks": {
+    "legacy compared": true,
+    "production unchanged": true,
+    "restore byte-identical": true,
+    "staging deterministic": true,
+    "tables deterministic": true
+  },
+  "legacy_diff": {
+    "explanation": "The PIT table covers both markets and every security the exchange published, including ones absent from the legacy master. A non-zero delta is expected and is explained by scope, not by a disagreement about any individual price.",
+    "probes": [
+      {
+        "delta": 0,
+        "legacy_rows": 1878,
+        "pit_rows": 1878,
+        "session": "2025-01-02"
+      },
+      {
+        "delta": 0,
+        "legacy_rows": 1920,
+        "pit_rows": 1920,
+        "session": "2025-10-17"
+      },
+      {
+        "delta": 0,
+        "legacy_rows": 1982,
+        "pit_rows": 1982,
+        "session": "2026-08-03"
+      }
+    ],
+    "state": "compared"
+  },
+  "production_unchanged": true,
+  "protected_after": {
+    "duckdb": {
+      "bytes": 460075008,
+      "sha256": "3f09642ddd53d85f122252a7f81149e8edcf8708bbb1232f4cba397ef43c4427"
+    },
+    "legacy_raw": {
+      "bytes": 188953095,
+      "files": 5001,
+      "sha256": "8d157f971772853afe612212ba5133b761846a5046692b0ac7e3f7fff1a60089"
+    },
+    "stock_master": {
+      "bytes": 174497,
+      "sha256": "f694febfbe0d79029ad156b4bebc39b16a6adb3ad2df986bfcc63f8c7547c4fb"
+    }
+  },
+  "protected_before": {
+    "duckdb": {
+      "bytes": 460075008,
+      "sha256": "3f09642ddd53d85f122252a7f81149e8edcf8708bbb1232f4cba397ef43c4427"
+    },
+    "legacy_raw": {
+      "bytes": 188953095,
+      "files": 5001,
+      "sha256": "8d157f971772853afe612212ba5133b761846a5046692b0ac7e3f7fff1a60089"
+    },
+    "stock_master": {
+      "bytes": 174497,
+      "sha256": "f694febfbe0d79029ad156b4bebc39b16a6adb3ad2df986bfcc63f8c7547c4fb"
+    }
+  },
+  "restore_drill": {
+    "files": 163,
+    "identical": true,
+    "state": "restored",
+    "tree_sha256": "e5980d098a375474"
+  },
+  "schema_id": "tw-alpha-m3-validation/1.0.0",
+  "staging_determinism": {
+    "dataset_id": "8bba98ede67f4177",
+    "dataset_id_identical": true,
+    "index_identical": true
+  },
+  "table_determinism": {
+    "all_identical": true,
+    "calendar_lifecycle": {
+      "hashes": {
+        "trading_calendar_pit": "06261e34103cb336"
+      },
+      "identical": true
+    },
+    "prices_actions": {
+      "identical": true,
+      "price_rows": 739930
+    },
+    "status_fundamentals": {
+      "identical": true,
+      "status_rows": 15574
+    }
+  },
+  "validated_at": "2026-08-18T12:01:34.126895+00:00",
+  "verdict": "passed"
+}
