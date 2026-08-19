@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import sys
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -38,6 +39,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 SCHEMA_ID = "tw-alpha-m3-prices-actions/1.0.0"
 PRICE_SOURCES = {"TWSE-PRICE-HIST": "TWSE", "TPEX-PRICE-HIST": "TPEX"}
 ACTION_SOURCES = {"TWSE-ACTIONS-HIST": "TWSE"}
+# TPEx publishes no range-based ex-right history; its official route is one
+# MOPS document per announcement, so it arrives as details rather than a
+# table and is promoted from a different source id.
+ACTION_DETAIL_SOURCES = {"MOPS-TPEX-ACTIONS-DETAIL": "TPEX"}
 WINDOW = (date(2025, 1, 1), date(2026, 8, 3))
 
 OHLC_COMPLETE = "complete"
@@ -157,57 +162,172 @@ def build_prices(staging: Path, index: list[dict[str, Any]], manifests: dict[str
     return rows, state_counts, sorted(columns_seen)
 
 
+# The TPEx detail observation is addressed by the announcement it came from,
+# and that is the only place its announcement date survives: the parsed
+# document itself carries the ex-date and the amounts but not the date the
+# announcement was published.
+TPEX_DETAIL_PERIOD = re.compile(
+    r"company:TPEX:(?P<symbol>\d{4,6}):announced:(?P<announced>\d{4}-\d{2}-\d{2})"
+)
+
+# What makes two rows the same corporate action. Deliberately includes the
+# amounts: an announcement that restates the same ex-date with a different
+# dividend is a revision, not a duplicate, and both must survive.
+CONTENT_KEY = (
+    "market",
+    "symbol",
+    "effective_date",
+    "action_type",
+    "cash_dividend",
+    "stock_dividend_ratio",
+)
+
+
+def _action_row(
+    record: dict[str, Any],
+    market: str,
+    symbol: str,
+    source_row: dict[str, Any],
+    ordinal: int,
+    announced: str,
+) -> dict[str, Any]:
+    effective = first_present(source_row, "action_date", "ex_date", "date")
+    return {
+        "market": market,
+        "symbol": symbol,
+        "effective_date": str(effective) if effective else "",
+        "announced_at": announced,
+        # Without a publisher announcement date the earliest defensible
+        # knowledge time is our own first observation.
+        "availability_basis": (
+            "publisher-exact" if announced else "first-observed-only"
+        ),
+        "action_type": first_present(source_row, "action_type"),
+        "cash_dividend": first_present(source_row, "cash_dividend"),
+        "stock_dividend_ratio": first_present(source_row, "stock_dividend_ratio"),
+        "rights_ratio": first_present(source_row, "rights_ratio"),
+        "subscription_price": first_present(source_row, "subscription_price"),
+        "reference_price": first_present(
+            source_row, "reference_price", "ex_reference_price"
+        ),
+        "prior_close": first_present(source_row, "prior_close", "pre_close"),
+        "adjustment_factor": first_present(source_row, "adjustment_factor"),
+        "limit_up": first_present(source_row, "limit_up", "limit_up_price"),
+        "limit_down": first_present(source_row, "limit_down", "limit_down_price"),
+        # TWSE publishes the reference price it used; TPEx publishes only the
+        # dividend, so the two markets are not adjusted from the same evidence
+        # and the difference must stay visible to whoever adjusts prices.
+        "adjustment_evidence": (
+            "publisher-reference-price"
+            if first_present(source_row, "reference_price", "ex_reference_price")
+            else "publisher-dividend-amount-only"
+        ),
+        "source_id": record["source_id"],
+        "snapshot_id": record["snapshot_id"],
+        "parse_run_id": record["parse_run_id"],
+        "evidence_tier": record["evidence_tier"],
+        "evidence_state": "verified-snapshot",
+        "source_row_ordinal": ordinal,
+    }
+
+
+def collapse_actions(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One row per distinct action, announced as early as the publisher did.
+
+    The same MOPS announcement is reachable from more than one listing, and a
+    company may re-announce identical terms several times before the ex-date.
+    Keeping every copy would multiply one dividend into several; keeping the
+    latest announcement would claim the terms became knowable later than they
+    did. The earliest announcement of identical content is the correct one.
+    """
+
+    best: dict[tuple, dict[str, Any]] = {}
+    for row in rows:
+        key = tuple(str(row[field]) for field in CONTENT_KEY)
+        current = best.get(key)
+        if current is None:
+            best[key] = row
+            continue
+        # An empty announcement date must not win by sorting first.
+        if row["announced_at"] and (
+            not current["announced_at"] or row["announced_at"] < current["announced_at"]
+        ):
+            best[key] = row
+    return list(best.values())
+
+
 def build_actions(staging: Path, index: list[dict[str, Any]], manifests: dict[str, Path]):
     rows: list[dict[str, Any]] = []
-    missing_announcement = 0
     for record in index:
         market = ACTION_SOURCES.get(record["source_id"])
-        if not market:
+        detail_market = ACTION_DETAIL_SOURCES.get(record["source_id"])
+        if not market and not detail_market:
             continue
         manifest_path = manifests.get(record["parse_run_id"])
         if manifest_path is None:
             continue
+
+        period_match = (
+            TPEX_DETAIL_PERIOD.fullmatch(str(record["logical_period"]))
+            if detail_market
+            else None
+        )
         source_rows, _columns = parsed_rows(manifest_path)
         for ordinal, source_row in enumerate(source_rows):
             symbol = str(first_present(source_row, "symbol", "security_id", "code") or "").strip()
             if not symbol:
                 continue
-            effective = first_present(source_row, "action_date", "ex_date", "date")
-            announced = first_present(source_row, "announced_at", "announcement_date")
-            if announced is None:
-                missing_announcement += 1
+            if detail_market:
+                # A document whose code differs from the key it was requested
+                # under would attach one company's dividend to another.
+                if period_match is None or period_match.group("symbol") != symbol:
+                    continue
+                announced = period_match.group("announced")
+                emit_market = detail_market
+            else:
+                published = first_present(source_row, "announced_at", "announcement_date")
+                announced = str(published) if published else ""
+                emit_market = market
             rows.append(
-                {
-                    "market": market,
-                    "symbol": symbol,
-                    "effective_date": str(effective) if effective else "",
-                    "announced_at": str(announced) if announced else "",
-                    # Without a publisher announcement date the earliest
-                    # defensible knowledge time is our own first observation.
-                    "availability_basis": (
-                        "publisher-exact" if announced else "first-observed-only"
-                    ),
-                    "reference_price": first_present(
-                        source_row, "reference_price", "ex_reference_price"
-                    ),
-                    "prior_close": first_present(source_row, "prior_close", "pre_close"),
-                    "limit_up": first_present(source_row, "limit_up", "limit_up_price"),
-                    "limit_down": first_present(source_row, "limit_down", "limit_down_price"),
-                    "adjustment_evidence": "publisher-reference-price",
-                    "source_id": record["source_id"],
-                    "snapshot_id": record["snapshot_id"],
-                    "parse_run_id": record["parse_run_id"],
-                    "evidence_tier": record["evidence_tier"],
-                    "evidence_state": "verified-snapshot",
-                    "source_row_ordinal": ordinal,
-                }
+                _action_row(record, emit_market, symbol, source_row, ordinal, announced)
             )
+
+    rows = collapse_actions(rows)
     for row in rows:
         row["record_id"] = sha(
-            {k: str(row[k]) for k in ("market", "symbol", "effective_date", "snapshot_id")}
+            {
+                k: str(row[k])
+                for k in ("market", "symbol", "effective_date", "announced_at", "snapshot_id")
+            }
         )
-    rows.sort(key=lambda r: (r["effective_date"], r["market"], r["symbol"]))
-    return rows, missing_announcement
+    rows.sort(key=lambda r: (r["effective_date"], r["market"], r["symbol"], r["announced_at"]))
+
+    # A slot holding more than one row is a restatement, numbered so a caller
+    # can take the newest version announced by its own cutoff rather than
+    # silently receiving two answers.
+    slots: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    for row in rows:
+        slots.setdefault(
+            (row["market"], row["symbol"], row["effective_date"]), []
+        ).append(row)
+    revised = 0
+    for group in slots.values():
+        if len(group) > 1:
+            revised += 1
+        for ordinal, row in enumerate(sorted(group, key=lambda r: r["announced_at"])):
+            row["revision_ordinal"] = ordinal
+
+    stats = {
+        "missing_announcement_date": sum(1 for r in rows if not r["announced_at"]),
+        "announced_after_effective_date": sum(
+            1
+            for r in rows
+            if r["announced_at"] and r["effective_date"]
+            and r["announced_at"] > r["effective_date"]
+        ),
+        "restated_slots": revised,
+    }
+    return rows, stats
 
 
 def write(path: Path, rows: list[dict[str, Any]]) -> str:
@@ -226,7 +346,7 @@ def build(staging_root: Path, out_root: Path) -> dict[str, Any]:
     manifests = parse_manifest_index(staging_root)
 
     prices, ohlc_states, columns = build_prices(staging_root, index, manifests)
-    actions, missing_announcement = build_actions(staging_root, index, manifests)
+    actions, action_stats = build_actions(staging_root, index, manifests)
 
     price_sha = write(out_root / "daily_prices_pit.parquet", prices)
     action_sha = write(out_root / "corporate_actions_pit.parquet", actions)
@@ -249,16 +369,26 @@ def build(staging_root: Path, out_root: Path) -> dict[str, Any]:
         "corporate_actions_pit": {
             "rows": len(actions),
             "sha256": action_sha,
-            "missing_announcement_date": missing_announcement,
+            **action_stats,
             "distinct_symbols": len({(r["market"], r["symbol"]) for r in actions}),
             "markets": sorted({r["market"] for r in actions}),
+            "rows_by_market": {
+                market: sum(1 for r in actions if r["market"] == market)
+                for market in sorted({r["market"] for r in actions})
+            },
+            "publisher_exact": sum(
+                1 for r in actions if r["availability_basis"] == "publisher-exact"
+            ),
         },
         "notes": [
             "Prices are raw official and unadjusted; no adjusted series is "
             "derived here, and none may be without a documented method.",
             "Missing OHLC is preserved with a reason and never filled.",
-            "TPEx corporate actions come from MOPS per-symbol documents and "
-            "are not in this table yet; they remain in staging.",
+            "TPEx actions come from MOPS announcement documents, which give "
+            "the dividend but no reference price; `adjustment_evidence` "
+            "records which of the two the row rests on.",
+            "A slot with several rows is a restatement; take the highest "
+            "`revision_ordinal` whose `announced_at` is within the cutoff.",
         ],
     }
     (out_root / "dataset_manifest.json").write_text(

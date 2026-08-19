@@ -73,6 +73,7 @@ AlphaMaster 不得直接寫入正式策略、紙上帳本或真實委託；AI �
 - [M3.8 Exit review 與 Validation Owner 簽核](docs/evidence/m3-8-exit-review-2026-08-17.md)
 - [M3.9 公司行動取得公告日期](docs/evidence/m3-9-action-availability-2026-08-18.md)
 - [M3.10 減資公告日與停止買賣日](docs/evidence/m3-10-reduction-announcement-linkage-2026-08-19.md)
+- [M3.11 TPEx 公司行動晉升 canonical 表](docs/evidence/m3-11-tpex-actions-promotion-2026-08-19.md)
 - [M4 台股規則與成本契約](docs/contracts/m4-market-rules-contract.md)
 
 ## 已凍結的 M0 基線

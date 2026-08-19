@@ -64,6 +64,7 @@ Owner 已於 2026-08-03 批准 [`G0-A-fixed-window-certified-dates`](evidence/m3
 | M3.8 Exit review | `complete` | 檢查 G0 所選門檻、coverage、rollback、Validation Owner 簽核 | [Exit review 與簽核](evidence/m3-8-exit-review-2026-08-17.md)：Validation Owner 已簽核，附七項已記錄例外 |
 | M3.9 公司行動可用性 | `complete` | 以 TEJ 除息公告日補上官方事件的 `announced_at` | [M3.9 證據](evidence/m3-9-action-availability-2026-08-18.md)：2,279/2,388 取得 `publisher-exact`，as-of 可見度由 0 升至 2,279 |
 | M3.10 減資公告日與停止買賣日 | `complete` | 由公告文件端點補上減資的 `announced_at` 與停止買賣日，停牌區間兩端俱全 | [M3.10 證據](evidence/m3-10-reduction-announcement-linkage-2026-08-19.md)：20/20 取得 `publisher-exact`，停牌區間內 20 檔皆無報價（與停牌資料互相獨立的交叉驗證） |
+| M3.11 TPEx 公司行動晉升 | `complete` | 由 MOPS 公告文件補上上櫃除權息，公告日期隨文件而來 | [M3.11 證據](evidence/m3-11-tpex-actions-promotion-2026-08-19.md)：corporate_actions_pit 1,670 → 3,814 列，2,149 筆 `publisher-exact`；價格異常未解釋數 171 → 97 |
 
 ## 5. 來源到 canonical table 的順序
 

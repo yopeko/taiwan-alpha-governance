@@ -94,7 +94,7 @@ TPEx 公司行動另有一層：已抓取 2,313 筆但尚未晉升至 canonical 
 | # | 例外 | 固定方式 |
 |---|---|---|
 | 1 | ~~TWT49U 無公告日期~~ **已於 2026-08-18 大幅解除**：TEJ 現金股息提供公告日，2,388 筆官方事件中 2,279 筆（95.4%）取得 `publisher-exact`，餘 109 筆 TEJ 未涵蓋者維持 `first-observed-only`。見 [M3.9 證據](m3-9-action-availability-2026-08-18.md) |
-| 2 | TPEx 公司行動未晉升 canonical 表 | strict xfail |
+| 2 | ~~TPEx 公司行動未晉升 canonical 表~~ **已於 2026-08-19 解除**：2,149 筆上櫃除權息已進入 `corporate_actions_pit`，全為 `publisher-exact`。見 [M3.11 證據](m3-11-tpex-actions-promotion-2026-08-19.md) |
 | 3 | TEJ 去重鍵為 `(market, symbol)`，代號重用被合併 | strict xfail |
 | 4 | 停牌依 D8 價格缺漏推定 | 契約記錄＋reason code `suspension-inferred-from-price-absence` |
 | 5 | 34 個來源無 quality policy | staging manifest 分兩級 |
