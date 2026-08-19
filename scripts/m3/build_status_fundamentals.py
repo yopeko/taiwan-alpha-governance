@@ -34,6 +34,10 @@ RAW = Path(r"C:\project\tw-sepa-screener\data\raw_v2")
 TEJ_LANE = RAW / "m3_tej_licensed_2026-08-16"
 WINDOW = (date(2025, 1, 1), date(2026, 8, 3))
 
+PAR_VALUE_SOURCES = {
+    "TWSE-PAR-VALUE-RESUME-HIST",
+    "TWSE-PAR-VALUE-FORECAST-HIST",
+}
 REDUCTION_SOURCES = {
     "TWSE-REDUCTION-RESUME-HIST",
     "TWSE-REDUCTION-FORECAST-HIST",
@@ -329,6 +333,79 @@ def build_reductions(index, manifests):
     return events
 
 
+
+def build_par_value_changes(index, manifests):
+    """Par-value changes as market-status intervals.
+
+    A par-value change splits the shares without changing what the company is
+    worth. Trading halts, and on resumption the price is restated on the new
+    share count — the same shape as a capital reduction, and the same danger:
+    the five in this window are the five largest unexplained single-day falls
+    in the whole price table, each a fall of about ninety percent that never
+    happened.
+
+    Unlike a reduction, the halt date needs no second request: the resumption
+    row carries it in its own detail link. No announcement date is obtainable
+    from either table, so every row is `unknown-blocked` — present as coverage,
+    invisible to as-of queries.
+    """
+
+    events: list[dict[str, Any]] = []
+    for record in index:
+        if record["source_id"] not in PAR_VALUE_SOURCES:
+            continue
+        manifest_path = manifests.get(record["parse_run_id"])
+        if manifest_path is None:
+            continue
+        for row in rows_of(manifest_path):
+            if row.get("record_kind") != "resumption":
+                continue
+            halt = str(row.get("halt_date") or "")
+            resumption = str(row.get("resumption_date") or "")
+            if not halt or not resumption or halt >= resumption:
+                continue
+            events.append(
+                {
+                    "market": "TWSE",
+                    "symbol": str(row["symbol"]),
+                    "event_kind": "par-value-change",
+                    # Neither published table carries an announcement date and
+                    # the forecast detail serves only pending changes, so there
+                    # is nothing here that says when this became knowable.
+                    "announced_at": "",
+                    "effective_from": halt,
+                    # Inclusive interval: the security trades again on its
+                    # resumption date, so the halt ends the day before.
+                    "effective_to": _day_before(resumption),
+                    "altered_trading": False,
+                    "reason_text": "變更股票面額",
+                    "measure_text": (
+                        f"resumption_date={resumption} "
+                        f"prior_close={row.get('prior_close')} "
+                        f"resumption_reference={row.get('resumption_reference_price')} "
+                        f"limit_up={row.get('limit_up')} "
+                        f"limit_down={row.get('limit_down')}"
+                    )[:400],
+                    "availability_basis": "unknown-blocked",
+                    "source_id": record["source_id"],
+                    "snapshot_id": record["snapshot_id"],
+                    "parse_run_id": record["parse_run_id"],
+                    "evidence_tier": record["evidence_tier"],
+                    "evidence_state": "verified-snapshot",
+                    "source_row_ordinal": int(row.get("source_row_ordinal") or 0),
+                }
+            )
+    for row in events:
+        row["record_id"] = sha(
+            {
+                k: str(row[k])
+                for k in ("market", "symbol", "event_kind", "effective_to", "snapshot_id")
+            }
+        )
+    events.sort(key=lambda r: (r["effective_to"], r["symbol"]))
+    return events
+
+
 def tej_announcements() -> dict[tuple[str, str], str]:
     """(symbol, period) -> publisher filing date, from the TEJ lane."""
 
@@ -413,9 +490,15 @@ def build(staging_root: Path, out_root: Path) -> dict[str, Any]:
     manifests = manifest_index(staging_root)
 
     events, coverage = build_status(index, manifests)
-    reductions = build_reductions(index, manifests)
+    # Halt events are collapsed on the event itself for the same reason status
+    # events are: a targeted capture re-requests every registered source, so
+    # one halt can arrive from several archives and would otherwise be counted
+    # once per archive.
+    halts = collapse_duplicates(
+        build_reductions(index, manifests) + build_par_value_changes(index, manifests)
+    )
     events = sorted(
-        events + reductions,
+        events + halts,
         key=lambda r: (r['effective_from'] or r['announced_at'], r['market'], str(r['symbol'])),
     )
     announcements = tej_announcements()
@@ -436,6 +519,9 @@ def build(staging_root: Path, out_root: Path) -> dict[str, Any]:
             },
             "altered_trading_rows": sum(1 for e in events if e["altered_trading"]),
             "with_announcement_date": sum(1 for e in events if e["announced_at"]),
+            "par_value_change_rows": sum(
+                1 for e in events if e["event_kind"] == "par-value-change"
+            ),
             "capital_reduction_rows": sum(
                 1 for e in events if e["event_kind"] == "capital-reduction"
             ),

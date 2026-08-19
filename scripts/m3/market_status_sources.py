@@ -32,6 +32,12 @@ TWSE_REDUCTION_FORECAST_URL = "https://www.twse.com.tw/rwd/zh/reducation/TWTAVU"
 # outside [\w,.-]; the detail page then splits it on the comma into STK_NO
 # and FILE_DATE. Both facts were read out of the page scripts, not guessed.
 TWSE_REDUCTION_DETAIL_URL = "https://www.twse.com.tw/rwd/zh/reducation/TWTAVUDetail"
+# Found through /rwd/zh/reportIndex/reportIndex, which lists all 117 TWSE
+# reports with their column names and paths. Three earlier guesses at where
+# a par-value report might live were all wrong; the index answered it in one
+# request and should be the first stop for any future endpoint hunt.
+TWSE_PAR_VALUE_RESUME_URL = "https://www.twse.com.tw/rwd/zh/change/TWTB8U"
+TWSE_PAR_VALUE_FORECAST_URL = "https://www.twse.com.tw/rwd/zh/change/TWTB7U"
 
 M3_MARKET_STATUS_SOURCES = (
     RawSourceDefinition(
@@ -77,6 +83,20 @@ M3_MARKET_STATUS_SOURCES = (
         required_parameters=(("response", "json"),),
     ),
     RawSourceDefinition(
+        source_id="TWSE-PAR-VALUE-RESUME-HIST",
+        publisher="TWSE",
+        endpoint_id="par-value-change-resumption-history",
+        url_prefixes=(TWSE_PAR_VALUE_RESUME_URL,),
+        required_parameters=(("response", "json"),),
+    ),
+    RawSourceDefinition(
+        source_id="TWSE-PAR-VALUE-FORECAST-HIST",
+        publisher="TWSE",
+        endpoint_id="par-value-change-forecast-history",
+        url_prefixes=(TWSE_PAR_VALUE_FORECAST_URL,),
+        required_parameters=(("response", "json"),),
+    ),
+    RawSourceDefinition(
         source_id="TPEX-STATUS-ATTENTION-HIST",
         publisher="TPEX",
         endpoint_id="trading-status-attention-history",
@@ -100,6 +120,14 @@ SOURCE_SPECS: dict[str, dict[str, object]] = {
     },
     "TWSE-REDUCTION-FORECAST-HIST": {
         "url": TWSE_REDUCTION_FORECAST_URL,
+        "calendar": "gregorian",
+    },
+    "TWSE-PAR-VALUE-RESUME-HIST": {
+        "url": TWSE_PAR_VALUE_RESUME_URL,
+        "calendar": "gregorian",
+    },
+    "TWSE-PAR-VALUE-FORECAST-HIST": {
+        "url": TWSE_PAR_VALUE_FORECAST_URL,
         "calendar": "gregorian",
     },
 }

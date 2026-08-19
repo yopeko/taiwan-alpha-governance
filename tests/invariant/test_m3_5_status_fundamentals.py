@@ -11,8 +11,8 @@ from pathlib import Path
 
 import pytest
 
-PIT = Path(r"C:\tmp\tw-alpha-m3-pit-status-06")
-PRICES = Path(r"C:\tmp\tw-alpha-m3-pit-prices-03")
+PIT = Path(r"C:\tmp\tw-alpha-m3-pit-status-07")
+PRICES = Path(r"C:\tmp\tw-alpha-m3-pit-prices-04")
 
 
 def table(name: str):
@@ -51,10 +51,35 @@ class TestMarketStatusAbsenceIsNotPermission:
         assert min(starts) <= "2025-01-01"
         assert max(ends) >= "2026-08-03"
 
-    def test_every_event_carries_an_announcement_date(self, status):
+    def test_an_event_without_an_announcement_date_is_named_and_blocked(self, status):
+        """Missing dates are allowed only where no source publishes one.
+
+        This began as "every event carries an announcement date", which held
+        until par-value changes arrived: TWSE publishes the halt and the
+        restated price but never says when it announced them. Loosening the
+        rule to "most events" would let a future source drop its dates
+        unnoticed, so the exception is named here instead, and every row inside
+        it must be blocked.
+        """
+
+        kinds = status["event_kind"].to_pylist()
         announced = status["announced_at"].to_pylist()
-        missing = sum(1 for value in announced if not value)
-        assert missing == 0, f"{missing} status events have no announcement date"
+        basis = status["availability_basis"].to_pylist()
+        unexpected = sorted(
+            {kinds[i] for i, value in enumerate(announced) if not value}
+            - {"par-value-change"}
+        )
+        assert not unexpected, (
+            f"these event kinds lost their announcement date: {unexpected}"
+        )
+        leaked = [
+            i
+            for i, value in enumerate(announced)
+            if not value and basis[i] != "unknown-blocked"
+        ]
+        assert not leaked, (
+            f"{len(leaked)} events have no announcement date yet are not blocked"
+        )
 
     def test_availability_basis_matches_the_announcement_date(self, status):
         announced = status["announced_at"].to_pylist()
@@ -105,15 +130,41 @@ class TestCapitalReductionHalts:
     to be present and ordered, or the row must be blocked outright.
     """
 
+    HALT_KINDS = ("capital-reduction", "par-value-change")
+
     def reductions(self, status):
+        """Every event that halts trading and restates the price on return.
+
+        A reduction and a par-value change differ only in why the share count
+        moved. Both stop trading, both come back on a restated price, and both
+        fail the same way, so they are guarded together.
+        """
+
         kinds = status["event_kind"].to_pylist()
-        return [i for i, kind in enumerate(kinds) if kind == "capital-reduction"]
+        return [i for i, kind in enumerate(kinds) if kind in self.HALT_KINDS]
 
     def test_reductions_are_present(self, status):
-        assert self.reductions(status), (
-            "no capital reductions; the resumption listing covers the window "
-            "and is known to contain them"
-        )
+        kinds = set(status["event_kind"].to_pylist())
+        for kind in self.HALT_KINDS:
+            assert kind in kinds, (
+                f"no {kind} events; the resumption listing covers the window "
+                "and is known to contain them"
+            )
+
+    def test_par_value_changes_stay_blocked_until_an_announcement_exists(self, status):
+        """Neither published table gives a date, so none may claim one.
+
+        The forecast detail serves only pending changes, so for anything
+        already resumed there is no official statement of when it became
+        knowable. Marking these usable would let a backtest act on a ten-to-one
+        split before anyone could have known about it.
+        """
+
+        kinds = status["event_kind"].to_pylist()
+        basis = status["availability_basis"].to_pylist()
+        rows = [i for i, kind in enumerate(kinds) if kind == "par-value-change"]
+        assert rows
+        assert {basis[i] for i in rows} == {"unknown-blocked"}
 
     def test_every_reduction_has_both_ends_of_its_halt(self, status):
         starts = status["effective_from"].to_pylist()

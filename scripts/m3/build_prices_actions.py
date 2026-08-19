@@ -348,8 +348,76 @@ def build_reduction_actions(index: list[dict[str, Any]], manifests: dict[str, Pa
     return rows
 
 
+def build_par_value_actions(index: list[dict[str, Any]], manifests: dict[str, Path]):
+    """A par-value change restates the price too, and by the largest factor.
+
+    Splitting the shares ten for one divides the price by ten. Without this row
+    the price table shows a ninety percent fall with no cause, which is both
+    the largest fabricated loss a backtest can inherit and the easiest to
+    mistake for a real collapse.
+
+    No announcement date exists in either published table, so these rows are
+    `unknown-blocked`: usable for explaining what happened, not for deciding
+    what was knowable.
+    """
+
+    from build_status_fundamentals import PAR_VALUE_SOURCES  # noqa: E402
+
+    def number(value: Any) -> float | None:
+        if value is None:
+            return None
+        text = str(value).strip()
+        if not re.fullmatch(r"[0-9]{1,9}(\.[0-9]{1,6})?", text):
+            return None
+        return float(text)
+
+    rows: list[dict[str, Any]] = []
+    for record in index:
+        if record["source_id"] not in PAR_VALUE_SOURCES:
+            continue
+        manifest_path = manifests.get(record["parse_run_id"])
+        if manifest_path is None:
+            continue
+        source_rows, _columns = parsed_rows(manifest_path)
+        for ordinal, source_row in enumerate(source_rows):
+            if source_row.get("record_kind") != "resumption":
+                continue
+            resumption = str(source_row.get("resumption_date") or "")
+            reference = source_row.get("resumption_reference_price")
+            if not resumption or reference in (None, ""):
+                continue
+            rows.append(
+                {
+                    "market": "TWSE",
+                    "symbol": str(source_row["symbol"]),
+                    "effective_date": resumption,
+                    "announced_at": "",
+                    "availability_basis": "unknown-blocked",
+                    "action_type": "par_value_change",
+                    "cash_dividend": None,
+                    "stock_dividend_ratio": None,
+                    "rights_ratio": None,
+                    "subscription_price": None,
+                    "reference_price": number(reference),
+                    "prior_close": number(source_row.get("prior_close")),
+                    "adjustment_factor": None,
+                    "limit_up": number(source_row.get("limit_up")),
+                    "limit_down": number(source_row.get("limit_down")),
+                    "adjustment_evidence": "publisher-resumption-reference-price",
+                    "source_id": record["source_id"],
+                    "snapshot_id": record["snapshot_id"],
+                    "parse_run_id": record["parse_run_id"],
+                    "evidence_tier": record["evidence_tier"],
+                    "evidence_state": "verified-snapshot",
+                    "source_row_ordinal": ordinal,
+                }
+            )
+    return rows
+
+
 def build_actions(staging: Path, index: list[dict[str, Any]], manifests: dict[str, Path]):
     rows: list[dict[str, Any]] = build_reduction_actions(index, manifests)
+    rows += build_par_value_actions(index, manifests)
     for record in index:
         market = ACTION_SOURCES.get(record["source_id"])
         detail_market = ACTION_DETAIL_SOURCES.get(record["source_id"])

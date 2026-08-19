@@ -592,6 +592,185 @@ REDUCTION_DETAIL_PARSER = ParserDefinition(
 )
 
 
+PAR_VALUE_SCHEMA = pa.schema(
+    [
+        pa.field("market", pa.string(), nullable=False),
+        pa.field("record_kind", pa.string(), nullable=False),
+        pa.field("symbol", pa.string(), nullable=False),
+        pa.field("security_name", pa.string(), nullable=True),
+        pa.field("halt_date", pa.date32(), nullable=True),
+        pa.field("resumption_date", pa.date32(), nullable=True),
+        pa.field("prior_close", pa.string(), nullable=True),
+        pa.field("resumption_reference_price", pa.string(), nullable=True),
+        pa.field("limit_up", pa.string(), nullable=True),
+        pa.field("limit_down", pa.string(), nullable=True),
+        pa.field("exchange_ratio", pa.string(), nullable=True),
+        pa.field("par_value_before", pa.string(), nullable=True),
+        pa.field("par_value_after", pa.string(), nullable=True),
+        pa.field("source_row_ordinal", pa.int32(), nullable=False),
+        pa.field("source_record_json", pa.string(), nullable=False),
+    ]
+)
+
+# A resumption row states its halt date only inside the 詳細資料 link, which
+# the detail page reads as STK_NO, STOP_DATE, RESUME_DATE. The middle value is
+# therefore the halt date by the publisher's own definition.
+_PAR_VALUE_LINK = re.compile(r"\s*\d{4,6}\s*,\s*(\d{8})\s*,\s*(\d{8})\s*")
+
+# Prices here reach four figures and are published as "1,215.00". A link
+# parameter such as "4763,20250619,20250630" must never be read as one, so a
+# comma is only accepted when followed by exactly three digits.
+_PAR_VALUE_PRICE = re.compile(r"[0-9]{1,3}(,[0-9]{3})*(\.[0-9]{1,4})?")
+
+
+def _par_value_halt_from_link(raw_row):
+    for cell in raw_row:
+        match = _PAR_VALUE_LINK.fullmatch(str(cell))
+        if match:
+            return _roc_or_iso(match.group(1))
+    return None
+
+
+def _build_par_value_parse_fn(record_kind: str):
+    """Parse the par-value-change resumption and forecast tables.
+
+    A par-value change splits the shares without changing what the company is
+    worth, so the price divides by the split ratio on resumption. Left
+    unrecorded it looks like a ninety percent collapse: the five in the M3
+    window are the five largest unexplained single-day falls in the table.
+
+    Unlike the capital-reduction tables, no second request is needed to learn
+    when trading stopped — the halt date travels in the row's own detail link.
+    """
+
+    def parse_fn(payload, _raw_manifest, _config) -> ParseBatch:
+        document = json.loads(payload.decode("utf-8-sig"))
+        rows: list[dict] = []
+        rejects: list[dict] = []
+        ordinal = 0
+        for fields, data in _tables(document):
+            names = [str(f) for f in fields]
+            i_sym = _index_of(names, "股票代號")
+            i_name = _index_of(names, "名稱")
+            i_halt = _index_of(names, "停止買賣日期")
+            i_resume = _index_of(names, "恢復買賣日期")
+            i_prev = _index_of(names, "停止買賣前收盤價格")
+            i_ref = _index_of(names, "恢復買賣參考價")
+            i_up = _index_of(names, "漲停價格")
+            i_down = _index_of(names, "跌停價格")
+            i_ratio = _index_of(names, "變更股票面額換股率")
+            i_before = _index_of(names, "變更前面額")
+            i_after = _index_of(names, "變更後面額")
+
+            for raw_row in data:
+                ordinal += 1
+                record = json.dumps(raw_row, ensure_ascii=False)
+
+                def cell(idx):
+                    if idx is None or len(raw_row) <= idx:
+                        return None
+                    return _clean(raw_row[idx])
+
+                def price(idx):
+                    value = cell(idx)
+                    if value is None:
+                        return None
+                    if not _PAR_VALUE_PRICE.fullmatch(value):
+                        return None
+                    return value.replace(",", "")
+
+                def day(idx):
+                    if idx is None or len(raw_row) <= idx:
+                        return None
+                    return _roc_or_iso(raw_row[idx])
+
+                symbol = cell(i_sym)
+                if not symbol or not symbol[:4].isdigit():
+                    rejects.append(
+                        {
+                            "source_row_ordinal": ordinal,
+                            "reject_reason": "row-has-no-security-code",
+                            "source_record_json": record,
+                        }
+                    )
+                    continue
+
+                halt = day(i_halt)
+                if halt is None:
+                    halt = _par_value_halt_from_link(raw_row)
+
+                rows.append(
+                    {
+                        "market": "TWSE",
+                        "record_kind": record_kind,
+                        "symbol": symbol[:6].strip(),
+                        "security_name": cell(i_name),
+                        "halt_date": halt,
+                        "resumption_date": day(i_resume),
+                        "prior_close": price(i_prev),
+                        "resumption_reference_price": price(i_ref),
+                        "limit_up": price(i_up),
+                        "limit_down": price(i_down),
+                        "exchange_ratio": cell(i_ratio),
+                        "par_value_before": price(i_before),
+                        "par_value_after": price(i_after),
+                        "source_row_ordinal": ordinal,
+                        "source_record_json": record,
+                    }
+                )
+        rows.sort(key=lambda r: (r["symbol"], r["source_row_ordinal"]))
+        return ParseBatch(
+            rows=pa.Table.from_pylist(rows, schema=PAR_VALUE_SCHEMA),
+            rejects=pa.Table.from_pylist(rejects, schema=REJECT_SCHEMA)
+            if rejects
+            else None,
+            diagnostics={
+                "parser_contract": PARSER_CONTRACT,
+                "row_count": len(rows),
+                "reject_count": len(rejects),
+            },
+        )
+
+    return parse_fn
+
+
+def _par_value_definition(
+    parser_id: str, source_id: str, endpoint_id: str, record_kind: str
+) -> ParserDefinition:
+    return ParserDefinition(
+        parser_id=parser_id,
+        source_ids=(source_id,),
+        endpoint_ids=(endpoint_id,),
+        output_schema=PAR_VALUE_SCHEMA,
+        primary_key=("market", "record_kind", "symbol", "source_row_ordinal"),
+        sort_keys=("market", "record_kind", "symbol", "source_row_ordinal"),
+        parse_fn=_build_par_value_parse_fn(record_kind),
+        code_resources=(_CODE_RESOURCE,),
+        default_config={
+            "parser_contract": PARSER_CONTRACT,
+            "security_scope": "four-digit-common-stock-v1",
+            "missing_value_policy": "preserved-not-filled",
+            "record_preservation": "canonical-source-record-json",
+        },
+    )
+
+
+M3_PAR_VALUE_PARSERS: tuple[ParserDefinition, ...] = (
+    _par_value_definition(
+        "twse-par-value-resumption/1",
+        "TWSE-PAR-VALUE-RESUME-HIST",
+        "par-value-change-resumption-history",
+        "resumption",
+    ),
+    _par_value_definition(
+        "twse-par-value-forecast/1",
+        "TWSE-PAR-VALUE-FORECAST-HIST",
+        "par-value-change-forecast-history",
+        "forecast",
+    ),
+)
+
+
 def build_m3_parser_registry() -> ParserRegistry:
     """P0 formal parsers plus the M3 market-status parsers."""
 
@@ -600,4 +779,5 @@ def build_m3_parser_registry() -> ParserRegistry:
         + M3_MARKET_STATUS_PARSERS
         + M3_REDUCTION_PARSERS
         + (REDUCTION_DETAIL_PARSER,)
+        + M3_PAR_VALUE_PARSERS
     )

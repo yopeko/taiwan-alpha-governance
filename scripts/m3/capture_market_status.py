@@ -167,6 +167,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--interval", type=float, default=1.0)
     parser.add_argument("--retry-limit", type=int, default=3)
     parser.add_argument(
+        "--sources",
+        default="",
+        help=(
+            "comma-separated source ids to capture; default is all. A "
+            "targeted capture that re-requests every source needlessly "
+            "loads the publisher and archives the same rows twice."
+        ),
+    )
+    parser.add_argument(
         "--producer-commit", default="fb87f62f8c2c68e2b85982cd102a35fd935bc0a4"
     )
     parser.add_argument(
@@ -191,7 +200,11 @@ def main(argv: list[str] | None = None) -> int:
     base_session = requests.Session()
     chunks = month_chunks(args.start, args.end)
 
-    for source_id in SOURCE_SPECS:
+    selected = [s.strip() for s in args.sources.split(",") if s.strip()]
+    unknown = sorted(set(selected) - set(SOURCE_SPECS))
+    if unknown:
+        raise SystemExit(f"unknown source ids: {unknown}")
+    for source_id in selected or list(SOURCE_SPECS):
         for start, end in chunks:
             period = f"range:{start.isoformat()}:{end.isoformat()}"
             if (source_id, period) in done:
@@ -227,7 +240,7 @@ def main(argv: list[str] | None = None) -> int:
         "schema_id": SCHEMA_ID,
         "output_root": str(root),
         "window": {"start": args.start.isoformat(), "end": args.end.isoformat()},
-        "sources": list(SOURCE_SPECS),
+        "sources": selected or list(SOURCE_SPECS),
         "chunk_count": len(chunks),
         "started_at": started_at.isoformat(),
         "completed_at": datetime.now(timezone.utc).isoformat(),
