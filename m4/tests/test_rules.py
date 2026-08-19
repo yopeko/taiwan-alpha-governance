@@ -282,6 +282,79 @@ class TestResolvePriceLimits:
             resolve_price_limits(D("100"), is_ex_rights_session=True)
 
 
+class TestCapitalReductionResumption:
+    """Every published limit of every reduction in the M3 window.
+
+    Captured from the exchange's own 股票減資恢復買賣參考價格 announcements so
+    the check does not need the warehouse to be built. Each row is
+    (symbol, prior close before the halt, resumption reference, limit up,
+    limit down).
+    """
+
+    OFFICIAL = [
+        ("2025", "10.50", "17.09", "18.75", "15.40"),
+        ("2371", "40.15", "41.73", "45.90", "37.60"),
+        ("4414", "3.17", "12.03", "13.20", "10.85"),
+        ("2101", "40.00", "44.08", "48.45", "39.70"),
+        ("3321", "7.62", "13.93", "15.30", "12.55"),
+        ("6120", "10.90", "11.00", "12.10", "9.90"),
+        ("2352", "30.15", "34.57", "38.00", "31.15"),
+        ("2489", "13.35", "13.73", "15.10", "12.40"),
+        ("2607", "35.00", "60.00", "66.00", "54.00"),
+        ("3057", "9.32", "14.31", "15.70", "12.90"),
+        ("9924", "44.80", "53.50", "58.80", "48.15"),
+        ("2314", "10.30", "24.46", "26.90", "22.05"),
+        ("2832", "36.00", "47.14", "51.80", "42.45"),
+        ("1808", "34.45", "37.16", "40.85", "33.45"),
+        ("9927", "52.40", "69.11", "76.00", "62.20"),
+        ("8103", "74.70", "86.11", "94.70", "77.50"),
+        ("3593", "8.10", "13.50", "14.85", "12.15"),
+        ("1414", "17.45", "18.27", "20.05", "16.45"),
+        ("2380", "6.60", "23.86", "26.20", "21.50"),
+        ("1459", "11.85", "12.46", "13.70", "11.25"),
+    ]
+
+    @pytest.mark.parametrize("symbol,prior,reference,up,down", OFFICIAL)
+    def test_the_standard_rule_reproduces_every_official_limit(
+        self, symbol, prior, reference, up, down
+    ):
+        got_up, got_down, basis = resolve_price_limits(
+            D(prior),
+            is_reduction_resumption_session=True,
+            resumption_reference_price=D(reference),
+        )
+        assert (got_up, got_down) == (D(up), D(down)), symbol
+        assert basis == "computed-from-publisher-resumption-reference"
+
+    @pytest.mark.parametrize("symbol,prior,reference,up,down", OFFICIAL)
+    def test_the_prior_close_would_have_been_wrong_every_time(
+        self, symbol, prior, reference, up, down
+    ):
+        """Why the resumption reference is required rather than optional.
+
+        If the prior close were an acceptable base, this rule could quietly
+        default to it. It never once produces the published limit, so a caller
+        that supplies the wrong one must be stopped rather than served.
+        """
+
+        wrong_up, wrong_down = price_limits(D(prior))
+        assert (wrong_up, wrong_down) != (D(up), D(down)), symbol
+
+    def test_a_resumption_without_the_reference_price_is_blocked(self):
+        with pytest.raises(RuleError):
+            resolve_price_limits(D("30.15"), is_reduction_resumption_session=True)
+
+    def test_published_limits_still_win_over_the_computation(self):
+        up, down, basis = resolve_price_limits(
+            D("30.15"),
+            official_limit_up=D("38.00"),
+            official_limit_down=D("31.15"),
+            is_reduction_resumption_session=True,
+        )
+        assert (up, down) == (D("38.00"), D("31.15"))
+        assert basis == "publisher-exact"
+
+
 class TestNewListingExemption:
     """A newly listed security trades without a price limit for five sessions."""
 

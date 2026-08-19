@@ -28,7 +28,7 @@ RAW = Path(r"C:\project\tw-sepa-screener\data\raw_v2")
 LEGACY_DB = Path(r"C:\project\tw-sepa-screener\data\tw_sepa.duckdb")
 STAGING = Path(r"C:\tmp\tw-alpha-m3-staging-06")
 PIT_CAL = Path(r"C:\tmp\tw-alpha-m3-pit-01")
-PIT_PRICE = Path(r"C:\tmp\tw-alpha-m3-pit-prices-02")
+PIT_PRICE = Path(r"C:\tmp\tw-alpha-m3-pit-prices-03")
 PIT_STATUS = Path(r"C:\tmp\tw-alpha-m3-pit-status-06")
 
 

@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-PIT = Path(r"C:\tmp\tw-alpha-m3-pit-prices-02")
+PIT = Path(r"C:\tmp\tw-alpha-m3-pit-prices-03")
 
 
 def table(name: str):
@@ -104,7 +104,11 @@ class TestCorporateActionAvailability:
         actually applied.
         """
 
-        allowed = {"publisher-reference-price", "publisher-dividend-amount-only"}
+        allowed = {
+            "publisher-reference-price",
+            "publisher-dividend-amount-only",
+            "publisher-resumption-reference-price",
+        }
         assert set(actions["adjustment_evidence"].to_pylist()) <= allowed
 
     def test_effective_date_is_present(self, actions):
@@ -115,22 +119,26 @@ class TestKnownGaps:
     """Gaps recorded as tests so they cannot be forgotten or quietly closed."""
 
     def test_twt49u_supplies_no_announcement_date_at_all(self, actions):
-        """Still true of TWSE, and only of TWSE.
+        """Still true of every row TWT49U produced.
 
-        The endpoint supplies no announcement date for any row, so every TWSE
-        action falls back to `first-observed-only` — and first observation is
-        2026, which puts it after every date in the window. M3.9 closes this
-        from the TEJ lane in a separate table; this table remains official-only
-        and therefore still unusable point-in-time for TWSE.
+        The endpoint supplies no announcement date for any of them, so they all
+        fall back to `first-observed-only` — and first observation is 2026,
+        which puts it after every date in the window. M3.9 closes this from the
+        TEJ lane in a separate table; here the rows stay official-only and
+        therefore still unusable point-in-time.
+
+        Scoped to the source rather than to the market, because TWSE reductions
+        reach this table through the reduction announcements instead and do
+        carry a date.
         """
 
         basis = [
             b
-            for b, market in zip(
+            for b, source in zip(
                 actions["availability_basis"].to_pylist(),
-                actions["market"].to_pylist(),
+                actions["source_id"].to_pylist(),
             )
-            if market == "TWSE"
+            if source == "TWSE-ACTIONS-HIST"
         ]
         assert basis and set(basis) == {"first-observed-only"}
 
@@ -152,6 +160,64 @@ class TestKnownGaps:
         ]
         assert pairs, "no TPEx actions"
         assert {basis for _, basis in pairs} == {"publisher-exact"}
+
+
+class TestCapitalReductionIsAlsoAnAction:
+    """The halt lives in market status; the price restatement lives here.
+
+    They are two facts about one event, and each is stored where its shape
+    fits. A consumer adjusting prices looks at corporate actions, and without
+    these rows it sees nothing on the day a security's price legitimately
+    jumps by a factor of ten.
+    """
+
+    def reductions(self, actions):
+        types = actions["action_type"].to_pylist()
+        return [i for i, t in enumerate(types) if t == "capital_reduction"]
+
+    def test_reductions_reach_the_action_table(self, actions):
+        assert self.reductions(actions), "no capital-reduction actions"
+
+    def test_each_one_carries_the_resumption_reference_price(self, actions):
+        """The reference is the whole point of the row.
+
+        The limits the exchange published are set around it, and the standard
+        ten percent rule reproduces them from it exactly. From the pre-halt
+        close it reproduces none of them.
+        """
+
+        reference = actions["reference_price"].to_pylist()
+        missing = [i for i in self.reductions(actions) if reference[i] in (None, "")]
+        assert not missing, (
+            f"{len(missing)} reductions have no resumption reference price"
+        )
+
+    def test_the_reference_is_not_the_pre_halt_close(self, actions):
+        """If they were equal the row would be carrying the wrong number.
+
+        6120 is the one reduction whose reference happens to sit near its prior
+        close, so a blanket inequality would be wrong; the check is that they
+        are not systematically identical.
+        """
+
+        reference = actions["reference_price"].to_pylist()
+        prior = actions["prior_close"].to_pylist()
+        rows = self.reductions(actions)
+        differing = sum(1 for i in rows if reference[i] != prior[i])
+        assert differing >= len(rows) - 1, (
+            "reference prices look copied from the prior close"
+        )
+
+    def test_the_published_limits_come_with_them(self, actions):
+        up = actions["limit_up"].to_pylist()
+        down = actions["limit_down"].to_pylist()
+        missing = [
+            i for i in self.reductions(actions) if up[i] is None or down[i] is None
+        ]
+        assert not missing, (
+            f"{len(missing)} reductions arrive without the limits the exchange "
+            "published, which is what lets M4 resolve them publisher-exact"
+        )
 
 
 class TestBothMarketsPresent:

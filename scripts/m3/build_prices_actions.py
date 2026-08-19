@@ -256,8 +256,100 @@ def collapse_actions(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return list(best.values())
 
 
-def build_actions(staging: Path, index: list[dict[str, Any]], manifests: dict[str, Path]):
+def build_reduction_actions(index: list[dict[str, Any]], manifests: dict[str, Path]):
+    """A capital reduction restates the price, so it is also an action.
+
+    The halt belongs in `market_status_pit` as an interval; this is the other
+    half of the same event. On the resumption session the exchange publishes a
+    new reference price, computed on the new share count, together with the
+    limits it set around it — the same three facts an ex-rights row carries,
+    and they belong in the same columns.
+
+    Without this row a price adjuster looking at corporate actions sees nothing
+    on the day a security's price legitimately jumps, and the standard limit
+    rule applied to the pre-halt close is wrong on every reduction.
+    """
+
+    # Imported rather than reimplemented: how a listing row names its own
+    # announcement document is one rule, and two copies of it would drift.
+    from build_status_fundamentals import (  # noqa: E402
+        REDUCTION_SOURCES,
+        _detail_key,
+        reduction_details,
+    )
+
+    def number(value: Any) -> float | None:
+        """The reduction parser keeps published prices as exact text.
+
+        This table stores them as doubles, so the conversion happens here and
+        anything that is not a plain decimal becomes null rather than a
+        coerced approximation.
+        """
+
+        if value is None:
+            return None
+        text = str(value).strip()
+        if not re.fullmatch(r"[0-9]{1,9}(\.[0-9]{1,6})?", text):
+            return None
+        return float(text)
+
+    details = reduction_details(index, manifests)
     rows: list[dict[str, Any]] = []
+    for record in index:
+        if record["source_id"] not in REDUCTION_SOURCES:
+            continue
+        manifest_path = manifests.get(record["parse_run_id"])
+        if manifest_path is None:
+            continue
+        source_rows, _columns = parsed_rows(manifest_path)
+        for ordinal, source_row in enumerate(source_rows):
+            if source_row.get("record_kind") != "resumption":
+                continue
+            resumption = str(source_row.get("resumption_date") or "")
+            reference = source_row.get("resumption_reference_price")
+            if not resumption or reference in (None, ""):
+                continue
+            key = _detail_key(source_row)
+            detail = details.get(key) if key else None
+            halt = str(detail.get("halt_date") or "") if detail else ""
+            announced = key[1] if key else ""
+            # Same ordering guard as the status table: an announcement that
+            # does not precede its own halt means the join is wrong.
+            if not (announced and halt and announced <= halt < resumption):
+                announced = ""
+            rows.append(
+                {
+                    "market": "TWSE",
+                    "symbol": str(source_row["symbol"]),
+                    "effective_date": resumption,
+                    "announced_at": announced,
+                    "availability_basis": (
+                        "publisher-exact" if announced else "unknown-blocked"
+                    ),
+                    "action_type": "capital_reduction",
+                    "cash_dividend": None,
+                    "stock_dividend_ratio": None,
+                    "rights_ratio": None,
+                    "subscription_price": None,
+                    "reference_price": number(reference),
+                    "prior_close": number(source_row.get("prior_close")),
+                    "adjustment_factor": None,
+                    "limit_up": number(source_row.get("limit_up")),
+                    "limit_down": number(source_row.get("limit_down")),
+                    "adjustment_evidence": "publisher-resumption-reference-price",
+                    "source_id": record["source_id"],
+                    "snapshot_id": record["snapshot_id"],
+                    "parse_run_id": record["parse_run_id"],
+                    "evidence_tier": record["evidence_tier"],
+                    "evidence_state": "verified-snapshot",
+                    "source_row_ordinal": ordinal,
+                }
+            )
+    return rows
+
+
+def build_actions(staging: Path, index: list[dict[str, Any]], manifests: dict[str, Path]):
+    rows: list[dict[str, Any]] = build_reduction_actions(index, manifests)
     for record in index:
         market = ACTION_SOURCES.get(record["source_id"])
         detail_market = ACTION_DETAIL_SOURCES.get(record["source_id"])

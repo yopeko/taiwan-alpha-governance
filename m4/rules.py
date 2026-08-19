@@ -133,6 +133,8 @@ def resolve_price_limits(
     official_limit_up: Decimal | None = None,
     official_limit_down: Decimal | None = None,
     is_ex_rights_session: bool = False,
+    is_reduction_resumption_session: bool = False,
+    resumption_reference_price: Decimal | None = None,
 ) -> tuple[Decimal, Decimal, str]:
     """Prefer the publisher's own limit prices; compute only as a fallback.
 
@@ -145,6 +147,16 @@ def resolve_price_limits(
     without published limits the result is `blocked` rather than a computed
     guess, because a wrong limit silently changes what an order engine
     believes is executable.
+
+    A capital reduction is the opposite case: the standard rule works exactly,
+    but only from the right base. On the resumption session the limits are set
+    around the exchange's 恢復買賣參考價, which reflects the new share count,
+    and not around the last close before the halt, which does not. Measured
+    against the 20 reductions in the M3 window the standard rule reproduces
+    every published limit from the resumption reference, and reproduces none of
+    them from the prior close. Passing the prior close would therefore be
+    wrong every single time, so this function refuses to guess which one it was
+    handed and requires the resumption reference explicitly.
     """
 
     if official_limit_up is not None and official_limit_down is not None:
@@ -154,6 +166,15 @@ def resolve_price_limits(
             "ex-rights session without published limit prices: the special "
             "official formula is not implemented, so limits are blocked"
         )
+    if is_reduction_resumption_session:
+        if resumption_reference_price is None:
+            raise RuleError(
+                "capital-reduction resumption session without the published "
+                "resumption reference price: the prior close belongs to the "
+                "old share count and would misprice every limit"
+            )
+        up, down = price_limits(resumption_reference_price)
+        return up, down, "computed-from-publisher-resumption-reference"
     up, down = price_limits(reference_price)
     return up, down, "computed-standard-10pct"
 
