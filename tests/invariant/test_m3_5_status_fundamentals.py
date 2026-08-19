@@ -11,7 +11,8 @@ from pathlib import Path
 
 import pytest
 
-PIT = Path(r"C:\tmp\tw-alpha-m3-pit-status-01")
+PIT = Path(r"C:\tmp\tw-alpha-m3-pit-status-06")
+PRICES = Path(r"C:\tmp\tw-alpha-m3-pit-prices-01")
 
 
 def table(name: str):
@@ -92,6 +93,108 @@ class TestMarketStatusAbsenceIsNotPermission:
         assert "suspension" not in kinds, (
             "suspension has no official historical source; if it appears here "
             "it came from somewhere unapproved"
+        )
+
+
+class TestCapitalReductionHalts:
+    """A reduction halt is the one status event with a hard price consequence.
+
+    Trading stops, and when it resumes the price is restated on a new share
+    base. A backtest that misses the halt sees an unexplained gap; one that
+    misses the restatement sees a fabricated return. Both dates therefore have
+    to be present and ordered, or the row must be blocked outright.
+    """
+
+    def reductions(self, status):
+        kinds = status["event_kind"].to_pylist()
+        return [i for i, kind in enumerate(kinds) if kind == "capital-reduction"]
+
+    def test_reductions_are_present(self, status):
+        assert self.reductions(status), (
+            "no capital reductions; the resumption listing covers the window "
+            "and is known to contain them"
+        )
+
+    def test_every_reduction_has_both_ends_of_its_halt(self, status):
+        starts = status["effective_from"].to_pylist()
+        ends = status["effective_to"].to_pylist()
+        missing = [
+            i for i in self.reductions(status) if not starts[i] or not ends[i]
+        ]
+        assert not missing, (
+            f"{len(missing)} reductions have an open-ended halt; the halt date "
+            "comes from the announcement document, so this means the document "
+            "was not joined"
+        )
+
+    def test_the_halt_starts_before_it_ends(self, status):
+        starts = status["effective_from"].to_pylist()
+        ends = status["effective_to"].to_pylist()
+        wrong = [i for i in self.reductions(status) if starts[i] >= ends[i]]
+        assert not wrong, f"{len(wrong)} reductions resume on or before they halt"
+
+    def test_a_usable_reduction_is_announced_before_it_halts(self, status):
+        announced = status["announced_at"].to_pylist()
+        starts = status["effective_from"].to_pylist()
+        basis = status["availability_basis"].to_pylist()
+        late = [
+            i
+            for i in self.reductions(status)
+            if basis[i] == "publisher-exact" and announced[i] > starts[i]
+        ]
+        assert not late, (
+            f"{len(late)} reductions claim an exact announcement dated after "
+            "the halt began, which would make the halt unknowable when it started"
+        )
+
+    def test_no_security_trades_during_its_own_halt(self, status):
+        """The strongest available check, and it shares no code with the halt.
+
+        The halt dates come from the announcement documents; the price table
+        comes from the daily quotation feed. If a security has a price inside
+        the interval this table calls a halt, one of the two is wrong.
+        """
+
+        path = PRICES / "daily_prices_pit.parquet"
+        if not path.is_file():
+            pytest.skip("daily_prices_pit not built on this machine")
+        pq = pytest.importorskip("pyarrow.parquet")
+        prices = pq.read_table(path, columns=["symbol", "session_date"])
+        traded: dict[str, set[str]] = {}
+        for symbol, session in zip(
+            prices["symbol"].to_pylist(), prices["session_date"].to_pylist()
+        ):
+            traded.setdefault(str(symbol), set()).add(str(session))
+
+        symbols = status["symbol"].to_pylist()
+        starts = status["effective_from"].to_pylist()
+        ends = status["effective_to"].to_pylist()
+        offenders = []
+        for i in self.reductions(status):
+            inside = sorted(
+                s
+                for s in traded.get(str(symbols[i]), ())
+                if starts[i] <= s <= ends[i]
+            )
+            if inside:
+                offenders.append((symbols[i], starts[i], ends[i], inside))
+        assert not offenders, (
+            "these securities have quoted prices inside their own halt: "
+            f"{offenders}"
+        )
+
+    def test_an_unjoined_reduction_is_blocked_rather_than_guessed(self, status):
+        announced = status["announced_at"].to_pylist()
+        basis = status["availability_basis"].to_pylist()
+        leaked = [
+            i
+            for i in self.reductions(status)
+            if not announced[i] and basis[i] != "unknown-blocked"
+        ]
+        assert not leaked, (
+            f"{len(leaked)} reductions have no announcement date but are not "
+            "blocked; they would enter as-of results with no evidence of when "
+            "they became knowable"
         )
 
 

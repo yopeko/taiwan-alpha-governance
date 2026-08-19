@@ -18,8 +18,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import sys
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -186,36 +187,75 @@ def build_status(index, manifests):
     return events, coverage
 
 
-def _detail_announcement(row: dict) -> str:
-    """Pull the publication date out of the forecast detail link parameter.
+DETAIL_SOURCE = "TWSE-REDUCTION-DETAIL-HIST"
 
-    The forecast row carries no announcement column; its detail link is
-    formatted `symbol,YYYYMMDD` where the date is when the forecast was
-    published. Nothing else in the row states when the reduction became
-    knowable, so this is the only defensible source for it.
+# The 詳細資料 cell of a listing row names the announcement document for that
+# row: "STK_NO,FILE_DATE", optionally followed by further dates.
+_DETAIL_CELL = re.compile(r"\s*(\d{4,6})\s*,\s*(\d{8})(?:\s*,\s*\d{8})*\s*")
+
+
+def _iso(digits: str) -> str:
+    return f"{digits[:4]}-{digits[4:6]}-{digits[6:8]}"
+
+
+def _day_before(iso_date: str) -> str:
+    try:
+        return (date.fromisoformat(iso_date) - timedelta(days=1)).isoformat()
+    except ValueError:
+        return ""
+
+
+def _detail_key(row: dict) -> tuple[str, str] | None:
+    """The announcement document this listing row points at.
+
+    Matching a resumption to its announcement by date proximity would be a
+    guess. The row names its own document, so the join is exact and a row
+    whose cell is missing or malformed stays unmatched rather than being
+    attached to whichever announcement happens to be nearest.
     """
 
-    import json as _json
-    import re as _re
-
-    raw = row.get("source_record_json") or ""
     try:
-        cells = _json.loads(raw)
+        cells = json.loads(row.get("source_record_json") or "")
     except (ValueError, TypeError):
-        return ""
+        return None
     for cell in cells:
-        match = _re.fullmatch(r"\s*\d{4,6}\s*,\s*(\d{8})\s*", str(cell))
+        match = _DETAIL_CELL.fullmatch(str(cell))
         if match:
-            digits = match.group(1)
-            return f"{digits[:4]}-{digits[4:6]}-{digits[6:8]}"
-    return ""
+            return match.group(1), _iso(match.group(2))
+    return None
+
+
+def reduction_details(index, manifests) -> dict[tuple[str, str], dict[str, Any]]:
+    """Announcement documents keyed by (symbol, file_date)."""
+
+    details: dict[tuple[str, str], dict[str, Any]] = {}
+    for record in index:
+        if record["source_id"] != DETAIL_SOURCE:
+            continue
+        manifest_path = manifests.get(record["parse_run_id"])
+        if manifest_path is None:
+            continue
+        for row in rows_of(manifest_path):
+            file_date = str(row.get("file_date") or "")
+            if not file_date:
+                continue
+            details.setdefault((str(row["symbol"]), file_date), row)
+    return details
 
 
 def build_reductions(index, manifests):
-    """Reduction rows as market-status intervals, keyed by resumption date."""
+    """Reduction rows as market-status intervals, keyed by resumption date.
 
-    forecasts: dict[tuple[str, str], str] = {}
-    raw_rows: list[dict] = []
+    The resumption listing publishes 恢復買賣日期 but not 停止買賣日期, and no
+    announcement date at all. Both come from the announcement document the row
+    names, so a reduction is only usable for as-of decisions when that document
+    was captured and its dates are ordered announcement -> halt -> resumption.
+    Anything else stays `unknown-blocked`: present in the table as coverage,
+    invisible to as-of queries.
+    """
+
+    details = reduction_details(index, manifests)
+    events: list[dict[str, Any]] = []
     for record in index:
         if record["source_id"] not in REDUCTION_SOURCES:
             continue
@@ -223,48 +263,64 @@ def build_reductions(index, manifests):
         if manifest_path is None:
             continue
         for row in rows_of(manifest_path):
-            row["_record"] = record
-            raw_rows.append(row)
-            if row.get("record_kind") == "forecast":
-                announced = _detail_announcement(row)
-                if announced and row.get("resumption_date"):
-                    forecasts[(str(row["symbol"]), str(row["resumption_date"]))] = announced
+            if row.get("record_kind") != "resumption":
+                continue
+            symbol = str(row["symbol"])
+            resumption = str(row.get("resumption_date") or "")
+            key = _detail_key(row)
+            detail = details.get(key) if key else None
 
-    events: list[dict] = []
-    for row in raw_rows:
-        if row.get("record_kind") != "resumption":
-            continue
-        record = row["_record"]
-        symbol = str(row["symbol"])
-        resumption = str(row.get("resumption_date") or "")
-        announced = forecasts.get((symbol, resumption), "")
-        events.append(
-            {
-                "market": "TWSE",
-                "symbol": symbol,
-                "event_kind": "capital-reduction",
-                "announced_at": announced,
-                # Trading is halted up to the day before it resumes.
-                "effective_from": str(row.get("halt_date") or ""),
-                "effective_to": resumption,
-                "altered_trading": False,
-                "reason_text": str(row.get("reduction_reason") or "")[:400],
-                "measure_text": (
-                    f"prior_close={row.get('prior_close')} "
-                    f"resumption_reference={row.get('resumption_reference_price')} "
-                    f"limit_up={row.get('limit_up')} limit_down={row.get('limit_down')}"
-                )[:400],
-                "availability_basis": (
-                    "publisher-exact" if announced else "unknown-blocked"
-                ),
-                "source_id": record["source_id"],
-                "snapshot_id": record["snapshot_id"],
-                "parse_run_id": record["parse_run_id"],
-                "evidence_tier": record["evidence_tier"],
-                "evidence_state": "verified-snapshot",
-                "source_row_ordinal": int(row.get("source_row_ordinal") or 0),
-            }
-        )
+            announced = key[1] if key else ""
+            halt = str(detail.get("halt_date") or "") if detail else ""
+            # Fail closed on anything out of order. An announcement that does
+            # not precede its own halt, or a halt that does not precede the
+            # resumption, means the join is wrong somewhere and the row must
+            # not be trusted to say when it became knowable.
+            ordered = bool(
+                announced and halt and resumption
+                and announced <= halt < resumption
+            )
+            if not ordered:
+                announced = ""
+
+            # `effective_to` is inclusive everywhere in this table, and the
+            # security trades again on its resumption date. Storing the
+            # resumption date itself would put a trading day inside a halt
+            # interval, so the interval ends the calendar day before. The
+            # publisher's resumption date is kept verbatim in `measure_text`.
+            last_halted = _day_before(resumption) if ordered else ""
+
+            events.append(
+                {
+                    "market": "TWSE",
+                    "symbol": symbol,
+                    "event_kind": "capital-reduction",
+                    "announced_at": announced,
+                    "effective_from": halt if ordered else "",
+                    "effective_to": last_halted,
+                    "altered_trading": False,
+                    "reason_text": str(row.get("reduction_reason") or "")[:400],
+                    "measure_text": (
+                        f"resumption_date={resumption} "
+                        f"prior_close={row.get('prior_close')} "
+                        f"resumption_reference={row.get('resumption_reference_price')} "
+                        f"limit_up={row.get('limit_up')} limit_down={row.get('limit_down')} "
+                        f"new_shares_per_thousand="
+                        f"{detail.get('new_shares_per_thousand') if detail else None} "
+                        f"cash_returned_per_share="
+                        f"{detail.get('cash_returned_per_share') if detail else None}"
+                    )[:400],
+                    "availability_basis": (
+                        "publisher-exact" if announced else "unknown-blocked"
+                    ),
+                    "source_id": record["source_id"],
+                    "snapshot_id": record["snapshot_id"],
+                    "parse_run_id": record["parse_run_id"],
+                    "evidence_tier": record["evidence_tier"],
+                    "evidence_state": "verified-snapshot",
+                    "source_row_ordinal": int(row.get("source_row_ordinal") or 0),
+                }
+            )
     for row in events:
         row["record_id"] = sha(
             {k: str(row[k]) for k in ("market", "symbol", "event_kind", "effective_to", "snapshot_id")}

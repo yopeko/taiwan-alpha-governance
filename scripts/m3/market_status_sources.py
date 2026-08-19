@@ -27,6 +27,11 @@ TPEX_ATTENTION_URL = "https://www.tpex.org.tw/www/zh-tw/bulletin/attention"
 # source. Endpoint paths are extracted, never guessed.
 TWSE_REDUCTION_RESUME_URL = "https://www.twse.com.tw/rwd/zh/reducation/TWTAUU"
 TWSE_REDUCTION_FORECAST_URL = "https://www.twse.com.tw/rwd/zh/reducation/TWTAVU"
+# Both reduction tables end in a 詳細資料 column holding "STK_NO,FILE_DATE".
+# The listing page turns that cell into a link by stripping every character
+# outside [\w,.-]; the detail page then splits it on the comma into STK_NO
+# and FILE_DATE. Both facts were read out of the page scripts, not guessed.
+TWSE_REDUCTION_DETAIL_URL = "https://www.twse.com.tw/rwd/zh/reducation/TWTAVUDetail"
 
 M3_MARKET_STATUS_SOURCES = (
     RawSourceDefinition(
@@ -62,6 +67,13 @@ M3_MARKET_STATUS_SOURCES = (
         publisher="TWSE",
         endpoint_id="capital-reduction-forecast-history",
         url_prefixes=(TWSE_REDUCTION_FORECAST_URL,),
+        required_parameters=(("response", "json"),),
+    ),
+    RawSourceDefinition(
+        source_id="TWSE-REDUCTION-DETAIL-HIST",
+        publisher="TWSE",
+        endpoint_id="capital-reduction-detail-history",
+        url_prefixes=(TWSE_REDUCTION_DETAIL_URL,),
         required_parameters=(("response", "json"),),
     ),
     RawSourceDefinition(
@@ -129,3 +141,17 @@ def echoed_range_matches(payload: object, start: date, end: date) -> bool:
         return True
     expected = f"{start.strftime('%Y%m%d')}~{end.strftime('%Y%m%d')}"
     return echoed.strip() == expected
+
+
+# The detail endpoint is addressed by security and announcement file, not by a
+# date range, so it is deliberately absent from SOURCE_SPECS: the range capture
+# loop has no meaningful chunk to request for it. Its keys are derived from the
+# 詳細資料 column of an already-captured listing, never enumerated blindly.
+def detail_parameters(stk_no: str, file_date: str) -> dict[str, str]:
+    """Request parameters for one capital-reduction announcement document."""
+
+    return {"response": "json", "STK_NO": stk_no, "FILE_DATE": file_date}
+
+
+def detail_period(stk_no: str, file_date: str) -> str:
+    return f"detail:{stk_no}:{file_date}"

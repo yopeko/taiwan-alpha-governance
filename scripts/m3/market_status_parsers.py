@@ -460,6 +460,138 @@ M3_REDUCTION_PARSERS: tuple[ParserDefinition, ...] = (
 )
 
 
+REDUCTION_DETAIL_SCHEMA = pa.schema(
+    [
+        pa.field("market", pa.string(), nullable=False),
+        pa.field("symbol", pa.string(), nullable=False),
+        pa.field("security_name", pa.string(), nullable=True),
+        pa.field("file_date", pa.date32(), nullable=True),
+        pa.field("halt_date", pa.date32(), nullable=True),
+        pa.field("new_shares_per_thousand", pa.string(), nullable=True),
+        pa.field("cash_returned_per_share", pa.string(), nullable=True),
+        pa.field("cash_dividend_per_share", pa.string(), nullable=True),
+        pa.field("source_row_ordinal", pa.int32(), nullable=False),
+        pa.field("source_record_json", pa.string(), nullable=False),
+    ]
+)
+
+
+def _reduction_detail_parse_fn(
+    payload: bytes,
+    raw_manifest: Mapping[str, Any],
+    _config: Mapping[str, Any],
+) -> ParseBatch:
+    """Parse one capital-reduction announcement document.
+
+    This is the only place the exchange states the halt date for a reduction
+    that has already resumed: the resumption table publishes 恢復買賣日期 but
+    not 停止買賣日期, so without this document the halt interval has an end and
+    no beginning.
+
+    `FILE_DATE` never appears in the response body — it is the request key that
+    addresses the announcement document. It is read back from the observation
+    manifest rather than re-derived, so the parsed row can only ever carry the
+    key that was actually requested.
+    """
+
+    document = json.loads(payload.decode("utf-8-sig"))
+    parameters = raw_manifest.get("request_parameters") or {}
+    file_date = _roc_or_iso(str(parameters.get("FILE_DATE") or ""))
+    requested_symbol = str(parameters.get("STK_NO") or "").strip()
+
+    rows: list[dict] = []
+    rejects: list[dict] = []
+    ordinal = 0
+    for fields, data in _tables(document):
+        names = [str(f) for f in fields]
+        i_sym = _index_of(names, "股票代號")
+        i_name = _index_of(names, "股票名稱")
+        i_halt = _index_of(names, "停止買賣日期")
+        i_new = _index_of(names, "每壹仟股換發新股票")
+        i_cash = _index_of(names, "每股退還股款")
+        i_div = _index_of(names, "原股每股配發現金股利")
+
+        for raw_row in data:
+            ordinal += 1
+            record = json.dumps(raw_row, ensure_ascii=False)
+
+            def cell(idx):
+                if idx is None or len(raw_row) <= idx:
+                    return None
+                return _clean(raw_row[idx])
+
+            symbol = cell(i_sym)
+            if not symbol or not symbol[:4].isdigit():
+                rejects.append(
+                    {
+                        "source_row_ordinal": ordinal,
+                        "reject_reason": "row-has-no-security-code",
+                        "source_record_json": record,
+                    }
+                )
+                continue
+            symbol = symbol[:6].strip()
+            # A document served under a different code than the one requested
+            # would silently attach one company's reduction to another.
+            if requested_symbol and symbol != requested_symbol:
+                rejects.append(
+                    {
+                        "source_row_ordinal": ordinal,
+                        "reject_reason": "symbol-differs-from-requested-key",
+                        "source_record_json": record,
+                    }
+                )
+                continue
+            rows.append(
+                {
+                    "market": "TWSE",
+                    "symbol": symbol,
+                    "security_name": cell(i_name),
+                    "file_date": file_date,
+                    "halt_date": (
+                        _roc_or_iso(raw_row[i_halt])
+                        if i_halt is not None and len(raw_row) > i_halt
+                        else None
+                    ),
+                    "new_shares_per_thousand": cell(i_new),
+                    "cash_returned_per_share": cell(i_cash),
+                    "cash_dividend_per_share": cell(i_div),
+                    "source_row_ordinal": ordinal,
+                    "source_record_json": record,
+                }
+            )
+    rows.sort(key=lambda r: (r["symbol"], r["source_row_ordinal"]))
+    return ParseBatch(
+        rows=pa.Table.from_pylist(rows, schema=REDUCTION_DETAIL_SCHEMA),
+        rejects=pa.Table.from_pylist(rejects, schema=REJECT_SCHEMA)
+        if rejects
+        else None,
+        diagnostics={
+            "parser_contract": PARSER_CONTRACT,
+            "row_count": len(rows),
+            "reject_count": len(rejects),
+        },
+    )
+
+
+REDUCTION_DETAIL_PARSER = ParserDefinition(
+    parser_id="twse-capital-reduction-detail/1",
+    source_ids=("TWSE-REDUCTION-DETAIL-HIST",),
+    endpoint_ids=("capital-reduction-detail-history",),
+    output_schema=REDUCTION_DETAIL_SCHEMA,
+    primary_key=("market", "symbol", "file_date", "source_row_ordinal"),
+    sort_keys=("market", "symbol", "file_date", "source_row_ordinal"),
+    parse_fn=_reduction_detail_parse_fn,
+    code_resources=(_CODE_RESOURCE,),
+    default_config={
+        "parser_contract": PARSER_CONTRACT,
+        "security_scope": "four-digit-common-stock-v1",
+        "missing_value_policy": "preserved-not-filled",
+        "record_preservation": "canonical-source-record-json",
+    },
+)
+
+
 def build_m3_parser_registry() -> ParserRegistry:
     """P0 formal parsers plus the M3 market-status parsers."""
 
@@ -467,4 +599,5 @@ def build_m3_parser_registry() -> ParserRegistry:
         tuple(P0_FORMAL_PARSER_DEFINITIONS)
         + M3_MARKET_STATUS_PARSERS
         + M3_REDUCTION_PARSERS
+        + (REDUCTION_DETAIL_PARSER,)
     )
