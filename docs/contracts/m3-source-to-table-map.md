@@ -4,13 +4,13 @@
 
 | 欄位 | 值 |
 |---|---|
-| Contract ID | `tw-alpha-m3-source-map/1.1.0` |
-| Availability policy | `tw-alpha-m3-availability/1.0.0` |
+| Contract ID | `tw-alpha-m3-source-map/1.2.0` |
+| Availability policy | `tw-alpha-m3-availability/1.1.0` |
 | Conflict policy | `tw-alpha-m3-conflict/1.0.0` |
 | Licensed-vendor policy | `tw-alpha-m3-licensed-vendor/1.0.0` |
 | 狀態 | `approved-for-M3-shadow-build` |
 | 建立日 | 2026-08-16 |
-| 最後更新 | 2026-08-16（v1.1.0 加入 §1.8 TEJ lane 與 §1.2 行事曆政策）|
+| 最後更新 | 2026-08-19（v1.2.0 補正 §2.2 市場狀態與公司行動的 availability basis，納入 Owner 決定 D11）|
 | 上游 | [PIT warehouse contract](pit-warehouse-contract.md)、[M2 來源清冊](../m2-source-inventory.md) |
 | 涵蓋來源 | M2 durable archive 的 36 個 endpoint-level P0 sources |
 | 不涵蓋 | 交易成本、零股成交、帳本、策略評分（屬 M4 以後） |
@@ -181,13 +181,24 @@ effective_from        <= as_of_session
 
 ### 2.2 逐資料族的 availability basis
 
-| 資料族 | 預設 basis | 是否允許早於 `first_observed_at` |
+v1.0.0 把「市場狀態」與「公司行動」各視為單一資料族。實際建置後兩者都不成立：
+同一張表裡的事件來自公告結構完全不同的端點，有的逐筆附公告日期，有的一個都沒有。
+一列共用的預設值只能取最弱者，會把有公告日期的事件也一併封鎖。因此改為逐來源列出。
+
+| 資料族／來源 | 預設 basis | 是否允許早於 `first_observed_at` |
 |---|---|---|
 | 交易日曆 | `publisher-exact`（公告日期明確時） | 允許，但僅限公告日期可證明者 |
 | 證券生命週期 | `first-observed-only` | 否 |
 | 每日股價 | `approved-conservative-bound` = session date 當日 `15:00 Asia/Taipei` | 是，限本政策定義的保守 bound |
-| 市場狀態 | `first-observed-only` | 否 |
-| 公司行動 | `publisher-exact`（有 `announced_at`）否則 `first-observed-only` | 僅前者 |
+| **市場狀態**：處置／注意（TWSE punish、notice；TPEx disposal、attention）| `publisher-exact` | **是**，來源逐筆附 `公告日期` 欄位 |
+| **市場狀態**：減資停牌（TWTAUU + TWTAVUDetail）| `publisher-exact`，取 `FILE_DATE`；三日期未滿足 `公告 <= 停牌 < 恢復` 即退回 `unknown-blocked` | **是**，見 §2.2.1 |
+| **市場狀態**：面額變更停牌（TWTB8U）| `unknown-blocked` | 不適用——無任何來源提供公告日期 |
+| **市場狀態**：停牌（一般）| 不在表中 | 不適用——依 D8 由價格缺漏推定，僅作為 reason code |
+| **公司行動**：TWSE 除權息（TWT49U）| `first-observed-only` | 否——端點完全不提供公告日期 |
+| **公司行動**：TPEx 除權息（MOPS 公告文件）| `publisher-exact`，取自 observation 的公告定址鍵 | **是**，每筆行動即以其公告為單位取得 |
+| **公司行動**：減資恢復買賣 | 同上「市場狀態：減資停牌」 | 同上 |
+| **公司行動**：面額變更恢復買賣 | `unknown-blocked` | 不適用 |
+| **公司行動**：TEJ 除息公告日補充 | 見 §1.8，`licensed-vendor-snapshot` | 依 §1.8 |
 | 月營收 | `approved-conservative-bound` = 期後次月 10 日 `23:59 Asia/Taipei` | 是 |
 | 季報 | `first-observed-only` | 否（法定期限差異大，暫不設 bound） |
 
@@ -195,12 +206,42 @@ effective_from        <= as_of_session
 
 **月營收 bound 的理由**：台灣上市櫃公司月營收申報期限為次月 10 日。取當日 23:59 為最早可決策時間是保守做法。若實際觀測早於此 bound，仍以 bound 為準（較晚者勝）。
 
+### 2.2.1 減資 `FILE_DATE` 判為 `publisher-exact`（Owner 決定 D11）
+
+交易所的減資公告文件以 `TWTAVUDetail?STK_NO=…&FILE_DATE=…` 定址。回應本身
+**沒有**任何一欄叫「公告日期」，因此把 `FILE_DATE` 當成公布日期是一項判斷，
+需要 Validation Owner 裁決而非建置者自行認定。
+
+支持的證據：
+
+| 項目 | 內容 |
+|---|---|
+| 來源 | 交易所自己用來定址其公告文件的日期參數 |
+| 順序 | 20/20 早於停止買賣日 |
+| 非機械衍生 | 19/20 落在停牌前一個交易日；**2101 南港例外**，公告 2025-09-02、停牌 2025-09-04，中間 09-03 為交易日。若 `FILE_DATE` 是由停牌日回推的計算值，不會出現這個例外 |
+| 發布延遲上界 | 唯一待執行的 1563，`FILE_DATE` 2026-08-18，2026-08-19 已可在預告表看到 |
+
+**殘餘不確定性與其上界**：取得的是日期而非帶時分的發布紀錄。若真實發布時間晚於
+`FILE_DATE`，回測會比實際更早知道減資。因 19/20 的公告至停牌僅隔一個交易日，
+**最大前視暴露為一個交易日**。
+
+Owner 於 2026-08-19 裁決採 `publisher-exact`，並要求保留 `公告 <= 停牌 < 恢復`
+的 fail-closed 檢查：任一筆不成立即退回 `unknown-blocked`，不寫入公告日期。
+決定紀錄見 [D11](../evidence/m3-owner-decision-d11-2026-08-19.md)。
+
 ### 2.3 不允許的 availability 推定
 
 - 不得因為「資料現在存在」就推定它在歷史某日已存在。
 - 不得以 legacy DuckDB 的 `available_at` 作為 canonical basis；legacy 財報 overwrite 語意會把後期修訂值配到最早日期。
 - 季報不設保守 bound，因為不同公司、不同類型的法定申報期限差異過大，設定單一 bound 會系統性低估可得時間。
 - 任何新的 bound 必須經 Validation Owner 批准，且必須可重現、含 revision 防護。
+- **不得逕自把請求鍵裡的日期當成公布日期。** 端點常以日期定址其文件（`FILE_DATE`、
+  `STOP_DATE` 之類），那是定址鍵，不是發布者對發布時間的陳述。要當成 `publisher-exact`
+  必須逐案舉證並經 Validation Owner 裁決，且必須連同最大前視暴露一併記錄；
+  §2.2.1 是目前唯一獲准的案例。
+- 一個資料族內若不同來源的公告結構不同，**不得**以單一預設值概括。逐來源判定，
+  取不到公告日期者維持 `unknown-blocked`，不得向下相容成 `first-observed-only`
+  再靠首次觀測時間蒙混——首次觀測落在擷取當下，對歷史 cutoff 一律不可用。
 
 ### 2.4 Cutoff 與 revision 互動
 
