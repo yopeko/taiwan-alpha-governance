@@ -79,6 +79,26 @@ MODULES: dict[str, dict[str, Any]] = {
         "date_fields": ["announce_date"],
         "key": ["symbol", "period", "announce_date"],
     },
+    "dividend-announcement": {
+        "required": {
+            "symbol": ["證券代碼", "股票代號", "公司代碼", "coid", "symbol"],
+            # The ex-date is what the official record is keyed on, so it is
+            # the join key; TEJ labels it 年月日 like every other date column.
+            "ex_date": ["年月日", "除息交易日", "除權除息交易日"],
+            "announce_date": ["除息公告日", "除權公告日", "公告日"],
+        },
+        "optional": {
+            "reference_price": ["除息(權)參考價(元)"],
+            "dividend_type": ["股息分配型態"],
+            "market": ["市場別", "市場", "market", "mkt"],
+        },
+        "date_fields": ["ex_date", "announce_date"],
+        # One announcement per security per ex-date. Not deduplicated here:
+        # if the vendor carries two announcements for one ex-date they are
+        # different statements, and choosing between them is the consuming
+        # builder's decision, not the importer's.
+        "key": ["symbol", "ex_date"],
+    },
 }
 
 MARKET_ALIASES = {

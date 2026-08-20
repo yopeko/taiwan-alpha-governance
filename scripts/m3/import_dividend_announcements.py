@@ -1,5 +1,14 @@
 """M3.9: attach TEJ ex-dividend announcement dates to the official actions.
 
+SUPERSEDED as a table producer. The join now lives in `build_prices_actions`,
+so `corporate_actions_pit` has exactly one producer; this script remains as the
+audit that derived the join, and writes `action_availability_audit.parquet`.
+
+Two figures here are wider than the canonical table on purpose: this script
+reads every row TWT49U published, including ETFs, REITs and preferred shares,
+while the canonical table is scoped to M0's four-digit common stock. All 723
+rows in the difference are out of that scope and none is a common stock.
+
 TWT49U publishes the corporate actions but no announcement date, so every one
 of them fell back to `first-observed-only` and was therefore invisible at
 every historical cutoff. TEJ supplies the missing announcement date.
@@ -194,7 +203,7 @@ def main(argv: list[str] | None = None) -> int:
     table = pa.Table.from_pylist(
         [{k: (None if v == "" else v) for k, v in row.items()} for row in rows]
     )
-    out = args.out_root / "corporate_actions_pit.parquet"
+    out = args.out_root / "action_availability_audit.parquet"
     pq.write_table(table, out)
 
     usable = [r for r in rows if r["availability_basis"] == "publisher-exact"]

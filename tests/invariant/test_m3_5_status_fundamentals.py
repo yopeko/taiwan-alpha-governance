@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 PIT = Path(r"C:\tmp\tw-alpha-m3-pit-status-08")
-PRICES = Path(r"C:\tmp\tw-alpha-m3-pit-prices-05")
+PRICES = Path(r"C:\tmp\tw-alpha-m3-pit-prices-06")
 
 
 def table(name: str):

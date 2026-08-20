@@ -68,6 +68,7 @@ Owner 已於 2026-08-03 批准 [`G0-A-fixed-window-certified-dates`](evidence/m3
 | M3.12 變更股票面額 | `complete`（公告日除外）| 由 TWSE 報表索引查得 TWTB7U/TWTB8U，停牌區間與價格重述兩表分存 | [M3.12 證據](evidence/m3-12-par-value-change-2026-08-19.md)：5 筆全數取得，正是價格表最大的 5 筆無法解釋跌幅；無官方公告日期故全為 `unknown-blocked` |
 | M3.13 上櫃減資與面額變更 | `complete`（參考價除外）| 櫃買無歷史表，改由市場公告檔案 `bulletin/announcement` 取得 | [M3.13 證據](evidence/m3-13-tpex-reduction-par-value-2026-08-19.md)：22 筆停牌全為 `publisher-exact`；上櫃不再有跌幅逾 50% 的未解釋變動 |
 | M3.14 公司行動接入 as-of | `complete` | 除權息與價格重述在重建結果中可見，但不依公告日期過濾——生效日是當日事實 | [M3.14 證據](evidence/m3-14-actions-in-asof-2026-08-19.md)：新增 `corporate_action_state` 與 3 個 reason code，8 項 anti-lookahead invariant |
+| M3.15 單一公司行動表 | `complete` | TEJ 公告日期併入 canonical 表，供應商仍不定義事件集合 | [M3.15 證據](evidence/m3-15-single-action-table-2026-08-19.md)：`publisher-exact` 2,191 → 3,753；as-of 標為無法事先得知者 19/29 → 0/29 |
 
 ## 5. 來源到 canonical table 的順序
 

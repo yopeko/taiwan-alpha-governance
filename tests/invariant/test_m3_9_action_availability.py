@@ -14,16 +14,29 @@ from pathlib import Path
 
 import pytest
 
-PIT = Path(r"C:\tmp\tw-alpha-m3-actions-avail")
+# These now guard the canonical table rather than the one-off audit that
+# derived the join. An invariant protecting a table nobody reads protects
+# nothing, and there is no longer a second `corporate_actions_pit`.
+PIT = Path(r"C:\tmp\tw-alpha-m3-pit-prices-06")
 WINDOW = ("2025-01-01", "2026-08-03")
+OFFICIAL_SOURCE = "TWSE-ACTIONS-HIST"
 
 
 def table():
     path = PIT / "corporate_actions_pit.parquet"
     if not path.is_file():
-        pytest.skip("action availability table not built on this machine")
+        pytest.skip("corporate_actions_pit not built on this machine")
     pq = pytest.importorskip("pyarrow.parquet")
-    return pq.read_table(path)
+    full = pq.read_table(path)
+    # Scoped to the rows TWT49U produced, because those are the ones the
+    # vendor join touches. TPEx and the halt events reach the table with
+    # their own publishers' dates and are guarded elsewhere.
+    keep = [
+        i
+        for i, source in enumerate(full["source_id"].to_pylist())
+        if source == OFFICIAL_SOURCE
+    ]
+    return full.take(keep)
 
 
 @pytest.fixture(scope="module")
@@ -33,21 +46,21 @@ def actions():
 
 class TestOfficialEventSetIsPreserved:
     def test_every_official_event_survives_the_join(self, actions):
-        assert actions.num_rows == 2388, (
+        assert actions.num_rows == 1665, (
             "the official event count changed, which means the vendor join "
             "added or removed events instead of only adding a date"
         )
 
     def test_events_without_a_vendor_row_are_kept_not_dropped(self, actions):
         basis = actions["availability_basis"].to_pylist()
-        assert basis.count("first-observed-only") == 109, (
-            "the 109 events TEJ does not carry must remain in the table, "
-            "marked unusable rather than deleted"
+        assert basis.count("first-observed-only") == 103, (
+            "the events TEJ does not carry must remain in the table, marked "
+            "unusable rather than deleted"
         )
 
     def test_the_subject_is_the_official_record(self, actions):
-        assert set(actions["source_id"].to_pylist()) == {"TWSE-ACTIONS-HIST"}
-        assert all(actions["official_limit_up"].to_pylist())
+        assert set(actions["source_id"].to_pylist()) == {OFFICIAL_SOURCE}
+        assert all(actions["reference_price"].to_pylist())
 
 
 class TestAnnouncementSoundness:
@@ -82,14 +95,25 @@ class TestAnnouncementSoundness:
         assert not missing
 
     def test_lead_time_is_positive_for_every_usable_row(self, actions):
+        """Derived here rather than stored, so a stored value cannot drift.
+
+        A usable row must have been announced strictly before it took effect;
+        a lead of zero means the market learned of it on the day.
+        """
+
+        from datetime import date
+
         leads = [
-            lead
-            for lead, b in zip(
-                actions["lead_days"].to_pylist(),
+            (
+                date.fromisoformat(effective) - date.fromisoformat(announced)
+            ).days
+            for announced, effective, basis in zip(
+                actions["announced_at"].to_pylist(),
+                actions["effective_date"].to_pylist(),
                 actions["availability_basis"].to_pylist(),
                 strict=True,
             )
-            if b == "publisher-exact"
+            if basis == "publisher-exact"
         ]
         assert leads
         assert min(leads) >= 1

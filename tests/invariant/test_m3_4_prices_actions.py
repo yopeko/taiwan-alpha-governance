@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-PIT = Path(r"C:\tmp\tw-alpha-m3-pit-prices-05")
+PIT = Path(r"C:\tmp\tw-alpha-m3-pit-prices-06")
 
 
 def table(name: str):
@@ -119,29 +119,45 @@ class TestCorporateActionAvailability:
 class TestKnownGaps:
     """Gaps recorded as tests so they cannot be forgotten or quietly closed."""
 
-    def test_twt49u_supplies_no_announcement_date_at_all(self, actions):
-        """Still true of every row TWT49U produced.
+    def test_a_twt49u_date_is_always_labelled_as_vendor_evidence(self, actions):
+        """TWT49U still publishes no announcement date. The vendor supplies it.
 
-        The endpoint supplies no announcement date for any of them, so they all
-        fall back to `first-observed-only` — and first observation is 2026,
-        which puts it after every date in the window. M3.9 closes this from the
-        TEJ lane in a separate table; here the rows stay official-only and
-        therefore still unusable point-in-time.
-
-        Scoped to the source rather than to the market, because TWSE reductions
-        reach this table through the reduction announcements instead and do
-        carry a date.
+        This began as "no TWT49U row has a date at all", which held until the
+        licensed-vendor lane was joined in. The gap it recorded is closed, but
+        the risk it guarded moved rather than vanished: a vendor date wearing
+        official evidence would let a reader treat TEJ's word as the exchange's.
         """
 
-        basis = [
-            b
-            for b, source in zip(
+        rows = [
+            (basis, announced, evidence)
+            for basis, announced, evidence, source in zip(
                 actions["availability_basis"].to_pylist(),
+                actions["announced_at"].to_pylist(),
+                actions["announcement_evidence_state"].to_pylist(),
                 actions["source_id"].to_pylist(),
             )
             if source == "TWSE-ACTIONS-HIST"
         ]
-        assert basis and set(basis) == {"first-observed-only"}
+        assert rows
+        for basis, announced, evidence in rows:
+            if announced:
+                assert evidence == "licensed-vendor-snapshot", (
+                    "an announcement date on a TWT49U row can only have come "
+                    "from the vendor, so it must not claim official evidence"
+                )
+            else:
+                assert evidence == "missing-at-source"
+                assert basis == "first-observed-only"
+
+    def test_the_action_itself_never_becomes_vendor_evidence(self, actions):
+        """One field came from TEJ. Nothing else may.
+
+        The event set, the reference price and the limits are the exchange's.
+        If `evidence_state` ever follows the announcement into the vendor lane,
+        the official record has been quietly relabelled.
+        """
+
+        assert set(actions["evidence_state"].to_pylist()) == {"verified-snapshot"}
 
     def test_tpex_actions_carry_the_announcement_date_twse_lacks(self, actions):
         """The MOPS route gives what TWT49U does not.

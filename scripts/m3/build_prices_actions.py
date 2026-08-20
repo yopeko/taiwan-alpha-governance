@@ -43,6 +43,12 @@ ACTION_SOURCES = {"TWSE-ACTIONS-HIST": "TWSE"}
 # MOPS document per announcement, so it arrives as details rather than a
 # table and is promoted from a different source id.
 ACTION_DETAIL_SOURCES = {"MOPS-TPEX-ACTIONS-DETAIL": "TPEX"}
+# TWT49U publishes the ex-rights calculation but no announcement date, so
+# every TWSE row it produces is unusable point-in-time on its own. The date
+# comes from the licensed-vendor lane, which contributes that one field and
+# never defines which events exist.
+RAW_V2 = Path(r"C:\project\tw-sepa-screener\data\raw_v2")
+TEJ_DIVIDEND_LANE = RAW_V2 / "m3_tej_dividends_2026-08-19"
 WINDOW = (date(2025, 1, 1), date(2026, 8, 3))
 
 OHLC_COMPLETE = "complete"
@@ -222,6 +228,12 @@ def _action_row(
             if first_present(source_row, "reference_price", "ex_reference_price")
             else "publisher-dividend-amount-only"
         ),
+        "availability_reason": (
+            "publisher-announcement-date" if announced else "publisher-supplies-none"
+        ),
+        "announcement_evidence_state": (
+            "verified-snapshot" if announced else "missing-at-source"
+        ),
         "source_id": record["source_id"],
         "snapshot_id": record["snapshot_id"],
         "parse_run_id": record["parse_run_id"],
@@ -337,6 +349,14 @@ def build_reduction_actions(index: list[dict[str, Any]], manifests: dict[str, Pa
                     "limit_up": number(source_row.get("limit_up")),
                     "limit_down": number(source_row.get("limit_down")),
                     "adjustment_evidence": "publisher-resumption-reference-price",
+                    "availability_reason": (
+                        "publisher-announcement-date"
+                        if announced
+                        else "publisher-supplies-none"
+                    ),
+                    "announcement_evidence_state": (
+                        "verified-snapshot" if announced else "missing-at-source"
+                    ),
                     "source_id": record["source_id"],
                     "snapshot_id": record["snapshot_id"],
                     "parse_run_id": record["parse_run_id"],
@@ -404,6 +424,11 @@ def build_par_value_actions(index: list[dict[str, Any]], manifests: dict[str, Pa
                     "limit_up": number(source_row.get("limit_up")),
                     "limit_down": number(source_row.get("limit_down")),
                     "adjustment_evidence": "publisher-resumption-reference-price",
+                    # Not a conditional: neither TWSE par-value table carries an
+                    # announcement date, and the forecast detail serves only
+                    # pending changes, so for history there is nothing to have.
+                    "availability_reason": "publisher-supplies-none",
+                    "announcement_evidence_state": "missing-at-source",
                     "source_id": record["source_id"],
                     "snapshot_id": record["snapshot_id"],
                     "parse_run_id": record["parse_run_id"],
@@ -413,6 +438,86 @@ def build_par_value_actions(index: list[dict[str, Any]], manifests: dict[str, Pa
                 }
             )
     return rows
+
+
+
+def tej_dividend_announcements() -> dict[tuple[str, str], str]:
+    """(symbol, ex-date) -> announcement date, from the licensed-vendor lane.
+
+    The vendor supplies one field. It does not get to say which corporate
+    actions happened: comparison in M3.9 found 109 events the exchange
+    published and TEJ does not carry, so joining the other way round would
+    delete them without a trace.
+
+    Where the vendor holds more than one announcement for the same ex-date the
+    earliest is taken, for the same reason the official actions are collapsed
+    that way: identical terms announced twice were knowable from the first.
+    """
+
+    out: dict[tuple[str, str], str] = {}
+    if not TEJ_DIVIDEND_LANE.is_dir():
+        return out
+    for manifest_path in TEJ_DIVIDEND_LANE.rglob("import_manifest.json"):
+        manifest = json.loads(manifest_path.read_bytes())
+        if manifest.get("module") != "dividend-announcement":
+            continue
+        table = manifest_path.parent / "normalized" / "rows.parquet"
+        if not table.is_file():
+            continue
+        for row in pq.read_table(table).to_pylist():
+            symbol = str(row.get("symbol") or "").strip()
+            ex_date = str(row.get("ex_date") or "").strip()
+            announced = str(row.get("announce_date") or "").strip()
+            if not (symbol and ex_date and announced):
+                continue
+            key = (symbol, ex_date)
+            if key not in out or announced < out[key]:
+                out[key] = announced
+    return out
+
+
+def apply_announcements(
+    rows: list[dict[str, Any]], announcements: dict[tuple[str, str], str]
+) -> dict[str, int]:
+    """Fill in the announcement date TWT49U omits, with three explicit outcomes.
+
+    * `publisher-exact` — the vendor's date precedes the ex-date, so the action
+      was knowable in advance.
+    * `unknown-blocked` — the vendor's date is on or after the ex-date. The
+      action is real but nobody could have acted on it before it happened, so
+      it is kept and never made usable.
+    * `first-observed-only` — the vendor has no row for this official event.
+      First observation is the capture date, which is after every date in the
+      window, so these remain unusable at any historical cutoff.
+
+    Only rows that arrived without a date are touched. A row that already
+    carries one got it from its own publisher, and a vendor must not overwrite
+    the publisher.
+    """
+
+    counts: dict[str, int] = {}
+    for row in rows:
+        if row["announced_at"] or row["source_id"] != "TWSE-ACTIONS-HIST":
+            continue
+        announced = announcements.get((row["symbol"], row["effective_date"]), "")
+        if not announced:
+            reason = "no-vendor-row-for-this-official-event"
+            basis = "first-observed-only"
+        elif announced >= row["effective_date"]:
+            reason = "announcement-not-earlier-than-effect"
+            basis = "unknown-blocked"
+            row["announced_at"] = announced
+        else:
+            reason = "vendor-announcement-precedes-effect"
+            basis = "publisher-exact"
+            row["announced_at"] = announced
+        row["availability_basis"] = basis
+        row["availability_reason"] = reason
+        row["announcement_evidence_state"] = (
+            "licensed-vendor-snapshot" if announced else "missing-at-source"
+        )
+        counts[basis] = counts.get(basis, 0) + 1
+    return counts
 
 
 def build_tpex_announcement_actions(index: list[dict[str, Any]], manifests: dict[str, Path]):
@@ -476,6 +581,14 @@ def build_tpex_announcement_actions(index: list[dict[str, Any]], manifests: dict
                     "limit_up": None,
                     "limit_down": None,
                     "adjustment_evidence": "publisher-exchange-ratio-only",
+                    "availability_reason": (
+                        "publisher-announcement-date"
+                        if announced
+                        else "publisher-supplies-none"
+                    ),
+                    "announcement_evidence_state": (
+                        "verified-snapshot" if announced else "missing-at-source"
+                    ),
                     "source_id": record["source_id"],
                     "snapshot_id": record["snapshot_id"],
                     "parse_run_id": record["parse_run_id"],
@@ -526,6 +639,7 @@ def build_actions(staging: Path, index: list[dict[str, Any]], manifests: dict[st
             )
 
     rows = collapse_actions(rows)
+    vendor_counts = apply_announcements(rows, tej_dividend_announcements())
     for row in rows:
         row["record_id"] = sha(
             {
@@ -551,6 +665,7 @@ def build_actions(staging: Path, index: list[dict[str, Any]], manifests: dict[st
             row["revision_ordinal"] = ordinal
 
     stats = {
+        "vendor_announcement_outcomes": dict(sorted(vendor_counts.items())),
         "missing_announcement_date": sum(1 for r in rows if not r["announced_at"]),
         "announced_after_effective_date": sum(
             1
