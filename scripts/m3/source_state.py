@@ -31,11 +31,13 @@ PRODUCER_COMMIT = "fb87f62f8c2c68e2b85982cd102a35fd935bc0a4"
 #   898ef48a…  182 files.  M4 upstreamed: market_rules.py and its smoke test
 #              added to Taiwan Core.
 #   9820fd43…  184 files.  M5 upstreamed: ledger.py and its smoke test.
+#   e1657be4…  184 files.  plan_position snaps to a valid lot, after the
+#              M6 driver found the planner and the ledger disagreeing.
 #
 # Superseding the value here does not rewrite what an existing archive
 # recorded. Those are historical facts and stay as captured.
 SOURCE_STATE_FINGERPRINT = (
-    "9820fd4372014951130ac81e1abfb0bfa768bd43ed215d09565fe47bea6c5001"
+    "e1657be4b54ffffef159d0a6a4022a4f095319ef840b8407ac8a57ceff197324"
 )
 
 SOURCE_STATE_HISTORY: tuple[tuple[str, str], ...] = (
@@ -50,6 +52,10 @@ SOURCE_STATE_HISTORY: tuple[tuple[str, str], ...] = (
     (
         "9820fd4372014951130ac81e1abfb0bfa768bd43ed215d09565fe47bea6c5001",
         "M5 upstreamed to Taiwan Core",
+    ),
+    (
+        "e1657be4b54ffffef159d0a6a4022a4f095319ef840b8407ac8a57ceff197324",
+        "plan_position snaps to a valid lot",
     ),
 )
 

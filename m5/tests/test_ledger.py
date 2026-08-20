@@ -544,6 +544,41 @@ class TestPositionSizingRefusesRatherThanRoundsUp:
         assert not plan.is_trade
         assert plan.quantity == 0
 
+    def test_a_planned_quantity_is_always_a_lot_the_ledger_will_accept(self):
+        """The planner and the ledger must not disagree about what is sendable.
+
+        Sizing once produced 1,234 shares — two board lots plus 234 odd — and
+        `execute` rejected it as a mixed lot. The signal disappeared with no
+        record that any cap had refused it, because none had. Found by the M6
+        driver, where it happened 156 times in one run.
+        """
+
+        from m4.rules import classify_lot
+
+        for price in ("10", "25.5", "80", "137", "412"):
+            plan = plan_position(
+                nav=D("1000000"),
+                price=D(price),
+                stop_price=D(price) * D("0.92"),
+                open_positions=0,
+                settled_cash=D("1000000"),
+            )
+            if plan.is_trade:
+                classify_lot(plan.quantity)  # raises if the ledger would refuse
+
+    def test_snapping_to_a_lot_never_breaches_a_cap(self):
+        """Snapping rounds down, so every cap already applied still holds."""
+
+        plan = plan_position(
+            nav=D("1000000"),
+            price=D("50"),
+            stop_price=D("46"),
+            open_positions=0,
+            settled_cash=D("1000000"),
+        )
+        assert plan.is_trade
+        assert plan.planned_risk <= POLICY_HARD_RISK_CAP
+
     def test_a_position_whose_costs_swallow_its_risk_is_refused(self):
         """The NT$10,000 policy is where the minimum commission bites."""
 

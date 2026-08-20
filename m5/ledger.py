@@ -55,6 +55,7 @@ from typing import Iterable, Mapping, Sequence
 
 try:  # The canonical rules module, when Taiwan Core is importable.
     from tw_sepa_screener.market_rules import (
+        BOARD_LOT,
         BrokerTerms,
         RULES_VERSION,
         RuleError,
@@ -65,6 +66,7 @@ try:  # The canonical rules module, when Taiwan Core is importable.
     )
 except ImportError:  # pragma: no cover - the governance mirror's own layout
     from m4.rules import (  # type: ignore[no-redef]
+        BOARD_LOT,
         BrokerTerms,
         RULES_VERSION,
         RuleError,
@@ -597,6 +599,14 @@ def plan_position(
     if spendable <= 0:
         return PositionPlan(0, "cash-reserve-floor-reached")
     quantity = min(quantity, int(spendable / price))
+
+    # A quantity that is neither whole board lots nor a pure odd lot cannot be
+    # sent as one order, and `Ledger.execute` refuses it. Without this the
+    # planner and the ledger disagree: sizing produced 1,234 shares, execution
+    # rejected them, and the signal vanished with no record that a cap had
+    # been the reason. Snapping down stays inside every cap just applied.
+    if quantity > BOARD_LOT:
+        quantity -= quantity % BOARD_LOT
 
     if quantity <= 0:
         return PositionPlan(0, "no-quantity-satisfies-every-cap")
