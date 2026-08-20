@@ -77,6 +77,7 @@ AlphaMaster 不得直接寫入正式策略、紙上帳本或真實委託；AI �
 - [M3.11 TPEx 公司行動晉升 canonical 表](docs/evidence/m3-11-tpex-actions-promotion-2026-08-19.md)
 - [M3.12 變更股票面額取得官方來源](docs/evidence/m3-12-par-value-change-2026-08-19.md)
 - [M3.13 上櫃減資與變更股票面額](docs/evidence/m3-13-tpex-reduction-par-value-2026-08-19.md)
+- [M3.14 公司行動接入 as-of 重建](docs/evidence/m3-14-actions-in-asof-2026-08-19.md)
 - [M4 台股規則與成本契約](docs/contracts/m4-market-rules-contract.md)
 
 ## 已凍結的 M0 基線

@@ -53,6 +53,7 @@ class SecurityState:
     session_state: str
     market_status_state: str
     price_state: str
+    corporate_action_state: str
     tradability_state: str
     reason_codes: tuple[str, ...]
     lineage: tuple[str, ...] = field(default=())
@@ -86,6 +87,8 @@ class Warehouse:
         self._calendar = self._csv(self.calendar_root / "trading_calendar_pit.csv")
         self._intervals = self._csv(self.calendar_root / "security_intervals.csv")
         self._prices = self._parquet(self.prices_root / "daily_prices_pit.parquet")
+        self._actions = self._parquet(self.prices_root / "corporate_actions_pit.parquet")
+        self._action_window = self._window_of(self.prices_root)
         self._status = self._parquet(self.status_root / "market_status_pit.parquet")
         self._coverage = self._parquet(self.status_root / "market_status_coverage.parquet")
         self.dataset_id = self._dataset_id()
@@ -131,6 +134,48 @@ class Warehouse:
         if not announced_at:
             return False
         return announced_at <= decision_as_of
+
+    @staticmethod
+    def _window_of(root: Path) -> tuple[str, str]:
+        """The period the builder actually covered, as it recorded it.
+
+        Without this, "no action on this date" and "this date was never built"
+        are the same answer, and a query outside the window would silently
+        report every security as having no corporate action.
+        """
+
+        manifest = root / "dataset_manifest.json"
+        if not manifest.is_file():
+            return ("", "")
+        window = json.loads(manifest.read_bytes()).get("window") or {}
+        return (str(window.get("start") or ""), str(window.get("end") or ""))
+
+    def _has_action_coverage(self, session: str) -> bool:
+        start, end = self._action_window
+        return bool(start and end and start <= session <= end)
+
+    def _actions_for(self, market: str, session: str):
+        """Corporate actions taking effect on this very session.
+
+        Deliberately *not* filtered by announcement date. The exchange restated
+        the price on this day whether or not it told anyone in advance, and a
+        return computed across the day is wrong either way. Hiding the event
+        for want of an announcement would not protect against lookahead — the
+        effect is contemporaneous, not future — it would only hide a price
+        discontinuity that actually happened.
+
+        Whether it could have been anticipated is a separate question, answered
+        by `announced_at` and reported as its own reason code.
+        """
+
+        found: dict[str, list[dict[str, Any]]] = {}
+        for row in self._actions:
+            if row.get("market") != market:
+                continue
+            if _iso(row.get("effective_date")) != session:
+                continue
+            found.setdefault(str(row.get("symbol")), []).append(row)
+        return found
 
     def _status_for(self, market: str, session: str, decision_as_of: str):
         applicable: dict[str, list[dict[str, Any]]] = {}
@@ -189,6 +234,8 @@ class Warehouse:
         }
         status = {m: self._status_for(m, as_of_session, decision_as_of) for m in markets}
         coverage_flags = {m: self._has_status_coverage(m, as_of_session) for m in markets}
+        actions = {m: self._actions_for(m, as_of_session) for m in markets}
+        action_covered = self._has_action_coverage(as_of_session)
 
         states: list[SecurityState] = []
         for interval in self._intervals:
@@ -241,6 +288,32 @@ class Warehouse:
                     if any(e.get("altered_trading") for e in events):
                         reasons.append("status-altered-trading")
 
+            if not action_covered:
+                action_state = "no-coverage"
+                reasons.append("corporate-actions-not-covered-for-this-date")
+            else:
+                effective = actions[market].get(symbol, [])
+                if not effective:
+                    action_state = "no-action"
+                else:
+                    kinds = sorted(
+                        {str(a.get("action_type") or "unspecified") for a in effective}
+                    )
+                    action_state = "+".join(kinds)
+                    reasons.extend(f"action-{k}" for k in kinds)
+                    # The close on an ex-date is quoted on a different basis
+                    # from the previous close. A strategy that differences them
+                    # without adjusting reads the distribution as a loss.
+                    reasons.append("price-not-comparable-to-previous-close")
+                    if not any(
+                        _iso(a.get("announced_at")) and _iso(a.get("announced_at")) < as_of_session
+                        for a in effective
+                    ):
+                        # Either the publisher gave no announcement date or it
+                        # gave one no earlier than the effect. Nobody could
+                        # have positioned for this in advance.
+                        reasons.append("action-not-announced-in-advance")
+
             # Fail closed: eligible only when every input is positively known.
             if membership == "unknown":
                 tradability = "unknown"
@@ -250,7 +323,7 @@ class Warehouse:
                 tradability = "ineligible"
             elif price_state == "absent-from-official-table":
                 tradability = "blocked"
-            elif status_state == "no-coverage":
+            elif status_state == "no-coverage" or action_state == "no-coverage":
                 tradability = "unknown"
             elif price_state != "complete":
                 tradability = "blocked"
@@ -269,6 +342,7 @@ class Warehouse:
                     session_state=session_state,
                     market_status_state=status_state,
                     price_state=price_state,
+                    corporate_action_state=action_state,
                     tradability_state=tradability,
                     reason_codes=tuple(sorted(set(reasons))),
                     lineage=tuple(
@@ -285,7 +359,13 @@ class Warehouse:
             "markets": list(markets),
             "dataset_id": self.dataset_id,
             "states": [
-                [s.market, s.symbol, s.membership_state, s.tradability_state]
+                [
+                    s.market,
+                    s.symbol,
+                    s.membership_state,
+                    s.tradability_state,
+                    s.corporate_action_state,
+                ]
                 for s in states
             ],
         }
@@ -299,6 +379,8 @@ class Warehouse:
             coverage={
                 "session_states": session_states,
                 "status_coverage": coverage_flags,
+                "corporate_action_coverage": action_covered,
+                "corporate_action_window": list(self._action_window),
                 "securities_considered": len(states),
             },
             output_hash=_sha(payload),

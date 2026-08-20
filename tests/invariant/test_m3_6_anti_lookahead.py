@@ -222,3 +222,129 @@ class TestDeterminism:
         )
         assert first.dataset_id == second.dataset_id
         assert first.output_hash != second.output_hash
+
+
+class TestCorporateActionsAreVisible:
+    """Until now the as-of layer read prices and status but not actions.
+
+    That is its own failure mode, and a quiet one: every ex-dividend day looked
+    like an ordinary session, so a return computed across it counted the
+    distribution as a loss. These check that the event is surfaced, and that
+    surfacing it did not open a hole in the other direction.
+    """
+
+    # 2352 佳世達 resumed from its capital reduction on this session.
+    REDUCTION_SESSION = "2025-10-07"
+    # 4763 材料-KY resumed from a par-value change; TWSE publishes no
+    # announcement date for these at all.
+    PAR_VALUE_SESSION = "2025-06-30"
+    # 8932 智通 resumed from a TPEx par-value change, which does carry one.
+    TPEX_SESSION = "2026-03-09"
+
+    def one(self, warehouse, session, symbol):
+        result = warehouse.reconstruct(
+            as_of_session=session, decision_as_of=session
+        )
+        found = [s for s in result.securities if s.symbol == symbol]
+        assert found, f"{symbol} absent from {session}"
+        return found[0]
+
+    def test_a_restatement_session_is_not_silent(self, warehouse):
+        state = self.one(warehouse, self.REDUCTION_SESSION, "2352")
+        assert state.corporate_action_state == "capital_reduction"
+        assert "price-not-comparable-to-previous-close" in state.reason_codes
+
+    def test_an_ordinary_session_reports_no_action(self, warehouse):
+        """The flag has to mean something, so it must be off by default."""
+
+        state = self.one(warehouse, "2025-09-26", "2352")
+        assert state.corporate_action_state == "no-action"
+        assert "price-not-comparable-to-previous-close" not in state.reason_codes
+
+    def test_an_action_does_not_make_a_tradable_security_untradable(self, warehouse):
+        """An ex-date is an ordinary trading day.
+
+        The price basis changes; the ability to trade does not. Downgrading
+        tradability here would quietly remove every dividend payer from the
+        universe on its ex-date.
+        """
+
+        state = self.one(warehouse, self.REDUCTION_SESSION, "2352")
+        assert state.tradability_state == "eligible"
+
+    def test_an_unannounced_action_is_shown_but_labelled(self, warehouse):
+        """TWSE publishes the par-value change but never says when it said so.
+
+        The restatement still happened on the day, so hiding it would fabricate
+        a ninety percent loss. What must not happen is pretending it could have
+        been anticipated.
+        """
+
+        state = self.one(warehouse, self.PAR_VALUE_SESSION, "4763")
+        assert state.corporate_action_state == "par_value_change"
+        assert "action-not-announced-in-advance" in state.reason_codes
+
+    def test_an_announced_action_is_not_labelled_as_unannounced(self, warehouse):
+        """The same event kind, the other market, the better provenance.
+
+        If this ever starts matching the TWSE case, the announcement dates have
+        stopped reaching the table and nobody would otherwise notice.
+        """
+
+        state = self.one(warehouse, self.TPEX_SESSION, "8932")
+        assert state.corporate_action_state == "par_value_change"
+        assert "action-not-announced-in-advance" not in state.reason_codes
+
+    def test_no_action_dated_after_the_session_ever_appears(self, warehouse):
+        """The whole point. An action is surfaced on its effective date only.
+
+        Surfacing a future ex-date would hand the caller a dividend nobody had
+        yet received, which is the exact class of leak this module exists to
+        prevent.
+        """
+
+        session = "2025-07-15"
+        result = warehouse.reconstruct(as_of_session=session, decision_as_of="2026-08-03")
+        flagged = [
+            s
+            for s in result.securities
+            if s.corporate_action_state not in ("no-action", "no-coverage")
+        ]
+        assert flagged, "no actions at all on a session known to have them"
+        for state in flagged:
+            rows = [
+                row
+                for row in warehouse._actions
+                if row.get("market") == state.market
+                and str(row.get("symbol")) == state.symbol
+            ]
+            effective = {str(row.get("effective_date")) for row in rows}
+            assert session in effective, (
+                f"{state.symbol} was flagged on {session} with no action "
+                f"effective that day: {sorted(effective)}"
+            )
+
+    def test_a_later_cutoff_does_not_change_what_happened_that_day(self, warehouse):
+        """Actions are contemporaneous facts, so the cutoff must not move them.
+
+        Status and prices are filtered by what was knowable; the restatement is
+        not, because it took effect on the session being reconstructed. This
+        pins that distinction so it cannot be "fixed" into a leak later.
+        """
+
+        session = "2025-07-15"
+        same_day = warehouse.reconstruct(as_of_session=session, decision_as_of=session)
+        much_later = warehouse.reconstruct(
+            as_of_session=session, decision_as_of="2026-08-03"
+        )
+        by_symbol = {(s.market, s.symbol): s.corporate_action_state for s in same_day.securities}
+        for state in much_later.securities:
+            assert by_symbol[(state.market, state.symbol)] == state.corporate_action_state
+
+    def test_a_date_outside_the_built_window_is_unknown_not_empty(self, warehouse):
+        """Outside the window there is no evidence, which is not the same as none."""
+
+        start, end = warehouse._action_window
+        assert start and end, "the action table records no window"
+        assert not warehouse._has_action_coverage("2024-01-02")
+        assert warehouse._has_action_coverage(end)
