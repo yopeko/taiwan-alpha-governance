@@ -5,7 +5,7 @@
 | 欄位 | 值 |
 |---|---|
 | Contract ID | `tw-alpha-m4-rules/1.0.0` |
-| 狀態 | `reference-implementation-complete; broker-terms-unconfirmed` |
+| 狀態 | `upstreamed-to-taiwan-core; broker-terms-unconfirmed` |
 | 建立日 | 2026-08-16 |
 | 參考實作 | [`m4/rules.py`](../../m4/rules.py)、測試 [`m4/tests/test_rules.py`](../../m4/tests/test_rules.py) |
 | 測試結果 | **57 passed** |
@@ -13,7 +13,18 @@
 
 ### 實作位置說明
 
-參考實作放在治理倉庫的 `m4/` 而非 Taiwan Core。理由：M3.1f 的 TPEx 抓取執行中，其 producer evidence 綁定 Taiwan Core 目前的 source-state 指紋 `d4ef6c0f…`；此時修改 `src/` 會使進行中的 M3 證據與指紋不一致。M3 抓取全部結束後，應以獨立變更將本模組上游化至 Taiwan Core，並記錄指紋異動。
+**已於 2026-08-19 上游化。** canonical 位置為 Taiwan Core 的 `tw_sepa_screener.market_rules`，那是交易系統實際呼叫它的地方。
+
+治理倉庫保留 `m4/rules.py` 作為**逐位元相同的鏡像**，由 `tests/invariant/test_m4_upstream_parity.py` 以雜湊比對強制一致。鏡像存在只有一個理由：治理 CI 跑在沒有 Taiwan Core checkout 的機器上，而這 118 項是唯一只需要 Python 的 M4 測試。上游後刪除本地副本，等於把它們從所有自動化執行中移除、只剩操作者本機可驗。改動任一份，parity 測試即失敗；兩者都不是分支。
+
+**指紋異動**（原契約要求記錄）：
+
+| 指紋 | 檔數 | 期間 |
+|---|---:|---|
+| `d4ef6c0f…` | 180 | M2 release 至 M3 抓取結束；2026-08-03 至 08-19 的每一份 archive 記錄此值 |
+| `898ef48a…` | 182 | 本次上游化後（新增 `market_rules.py` 與其 smoke test）|
+
+既有 archive 記錄的舊值**不重寫**——那是歷史事實。詳見 [M4.2 證據](../evidence/m4-2-upstream-to-taiwan-core-2026-08-19.md)。
 
 ---
 
@@ -132,7 +143,7 @@ M0 對 M4 的退出要求為「官方範例與邊界條件有測試涵蓋，且�
 | 官方範例測試 | ✅ 含 2402 官方公布漲跌停實例 |
 | 券商條款可設定 | ✅ `BrokerTerms` |
 
-**M0 對 M4 的三項規則缺口已全部關閉**：新上市前五日、減資恢復日、除權息日漲跌停。**剩餘唯一阻擋項為參考實作尚未上游化至 Taiwan Core**，不需要券商費率。
+**M0 對 M4 的退出條件已全部滿足**：三項規則缺口（新上市前五日、減資恢復日、除權息日漲跌停）皆已關閉並以官方公布值驗證，參考實作亦已上游化至 Taiwan Core。券商費率為 `assumption` 且可設定，依 M0 不阻擋 M4。
 
 券商費率**不阻擋 M4**——M0 的退出條件只要求條款可設定。券商費率阻擋的是 M10 canary。
 

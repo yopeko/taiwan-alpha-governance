@@ -27,8 +27,13 @@ from typing import Any, Mapping
 
 import requests
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
 
+from source_state import (  # noqa: E402
+    PRODUCER_COMMIT,
+    SOURCE_STATE_FINGERPRINT,
+)
 from retry_policy import OFFICIAL_JSON, status_of  # noqa: E402
 from tw_sepa_screener.m2_daily_price_pilot import require_daily_price_output_root
 from tw_sepa_screener.raw_capture import RawCaptureStore
@@ -206,10 +211,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--markets", default="TWSE,TPEX")
     parser.add_argument("--interval", type=float, default=0.7)
     parser.add_argument("--retry-limit", type=int, default=3)
-    parser.add_argument("--producer-commit", default="fb87f62f8c2c68e2b85982cd102a35fd935bc0a4")
+    parser.add_argument("--producer-commit", default=PRODUCER_COMMIT)
     parser.add_argument(
         "--dirty-fingerprint",
-        default="d4ef6c0f50f4c480d39c9f1e7baa3fc10eac8b0fe27b584e1c35c7c80e3b5ee9",
+        default=SOURCE_STATE_FINGERPRINT,
     )
     args = parser.parse_args(argv)
 

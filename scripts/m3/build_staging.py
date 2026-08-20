@@ -28,6 +28,8 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from source_state import producer  # noqa: E402
+
 from capture_window import protected_fingerprints  # noqa: E402
 from tw_sepa_screener.m2_quality_profiles import (  # noqa: E402
     build_daily_price_quality_policy,
@@ -75,13 +77,7 @@ PROTECTED_PATHS = (
     Path(r"E:\tw-sepa-screener-backup"),
 )
 
-PRODUCER = {
-    "name": "tw-sepa-screener",
-    "commit": "fb87f62f8c2c68e2b85982cd102a35fd935bc0a4",
-    "dirty_fingerprint": (
-        "d4ef6c0f50f4c480d39c9f1e7baa3fc10eac8b0fe27b584e1c35c7c80e3b5ee9"
-    ),
-}
+PRODUCER = producer()
 
 
 class StagingError(RuntimeError):

@@ -8,8 +8,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from source_state import producer  # noqa: E402
 
 from tw_sepa_screener.archive_audit import audit_m2_archive
 from tw_sepa_screener.parse_replay import ParseReplayStore
@@ -21,13 +26,7 @@ from tw_sepa_screener.sources.raw_registry import (
     build_p0_formal_registry,
 )
 
-PRODUCER = {
-    "name": "tw-sepa-screener",
-    "commit": "fb87f62f8c2c68e2b85982cd102a35fd935bc0a4",
-    "dirty_fingerprint": (
-        "d4ef6c0f50f4c480d39c9f1e7baa3fc10eac8b0fe27b584e1c35c7c80e3b5ee9"
-    ),
-}
+PRODUCER = producer()
 
 BASELINE = {
     "duckdb": {

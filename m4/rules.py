@@ -10,6 +10,22 @@ docs/contracts/m4-market-rules-contract.md for the evidence behind each.
 
 This module is deliberately pure: no I/O, no network, no clock. Callers pass
 in the trading calendar and the reference prices they already hold.
+
+Two locations, one file
+-----------------------
+The canonical home is Taiwan Core, `tw_sepa_screener.market_rules`, because
+that is where the trading system will call it from. The governance repository
+keeps a byte-identical mirror at `m4/rules.py` and the two are asserted equal
+by `tests/invariant/test_m4_upstream_parity.py`.
+
+The mirror exists for one reason: governance CI runs on a machine that has no
+Taiwan Core checkout, and these are the only M4 tests that need nothing but
+Python. Moving the file upstream and deleting it here would have removed 118
+pure-logic tests from every automated run and left them checkable only on the
+operator's own machine. A mirror whose identity is enforced costs nothing and
+keeps them running.
+
+Edit either copy and the parity test fails. Neither is a fork.
 """
 
 from __future__ import annotations
