@@ -17,7 +17,7 @@ import pytest
 # These now guard the canonical table rather than the one-off audit that
 # derived the join. An invariant protecting a table nobody reads protects
 # nothing, and there is no longer a second `corporate_actions_pit`.
-PIT = Path(r"C:\tmp\tw-alpha-m3-pit-prices-06")
+PIT = Path(r"C:\tmp\tw-alpha-m3-pit-prices-07")
 WINDOW = ("2025-01-01", "2026-08-03")
 OFFICIAL_SOURCE = "TWSE-ACTIONS-HIST"
 

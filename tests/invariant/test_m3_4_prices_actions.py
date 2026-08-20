@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-PIT = Path(r"C:\tmp\tw-alpha-m3-pit-prices-06")
+PIT = Path(r"C:\tmp\tw-alpha-m3-pit-prices-07")
 
 
 def table(name: str):

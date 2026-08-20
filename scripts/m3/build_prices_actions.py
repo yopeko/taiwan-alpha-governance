@@ -189,6 +189,33 @@ CONTENT_KEY = (
 )
 
 
+
+# TWT49U publishes four columns the parser's typed output does not carry:
+# the two limits, the dividend-only reference price and the opening auction
+# base. They survive in `source_record_json`, which every parser here keeps
+# precisely so a later stage can recover a field nobody thought to type.
+#
+# M4.1 then proved these are not optional. On an ex-rights session the limits
+# come from 除權息參考價 and 減除股利參考價 together, and computing them from
+# the previous close is wrong on every row that carries a cash capital
+# increase. Leaving them out would have left the research dataset with a
+# confidently wrong limit on 1,665 sessions.
+_RAW_NUMBER = re.compile(r"[0-9]{1,3}(,[0-9]{3})*(\.[0-9]{1,6})?")
+
+
+def _raw_field(source_row: dict[str, Any], name: str) -> float | None:
+    try:
+        record = json.loads(source_row.get("source_record_json") or "")
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(record, dict):
+        return None
+    value = str(record.get(name) or "").strip()
+    if not _RAW_NUMBER.fullmatch(value):
+        return None
+    return float(value.replace(",", ""))
+
+
 def _action_row(
     record: dict[str, Any],
     market: str,
@@ -218,8 +245,15 @@ def _action_row(
         ),
         "prior_close": first_present(source_row, "prior_close", "pre_close"),
         "adjustment_factor": first_present(source_row, "adjustment_factor"),
-        "limit_up": first_present(source_row, "limit_up", "limit_up_price"),
-        "limit_down": first_present(source_row, "limit_down", "limit_down_price"),
+        "limit_up": first_present(source_row, "limit_up", "limit_up_price")
+        or _raw_field(source_row, "漲停價格"),
+        "limit_down": first_present(source_row, "limit_down", "limit_down_price")
+        or _raw_field(source_row, "跌停價格"),
+        # The second reference price. Equal to `reference_price` unless the
+        # distribution includes a cash capital increase, and that is exactly
+        # when the ex-rights limit formula needs both.
+        "dividend_only_reference_price": _raw_field(source_row, "減除股利參考價"),
+        "opening_auction_base": _raw_field(source_row, "開盤競價基準"),
         # TWSE publishes the reference price it used; TPEx publishes only the
         # dividend, so the two markets are not adjusted from the same evidence
         # and the difference must stay visible to whoever adjusts prices.
@@ -349,6 +383,8 @@ def build_reduction_actions(index: list[dict[str, Any]], manifests: dict[str, Pa
                     "limit_up": number(source_row.get("limit_up")),
                     "limit_down": number(source_row.get("limit_down")),
                     "adjustment_evidence": "publisher-resumption-reference-price",
+                    "dividend_only_reference_price": None,
+                    "opening_auction_base": None,
                     "availability_reason": (
                         "publisher-announcement-date"
                         if announced
@@ -424,6 +460,8 @@ def build_par_value_actions(index: list[dict[str, Any]], manifests: dict[str, Pa
                     "limit_up": number(source_row.get("limit_up")),
                     "limit_down": number(source_row.get("limit_down")),
                     "adjustment_evidence": "publisher-resumption-reference-price",
+                    "dividend_only_reference_price": None,
+                    "opening_auction_base": None,
                     # Not a conditional: neither TWSE par-value table carries an
                     # announcement date, and the forecast detail serves only
                     # pending changes, so for history there is nothing to have.
@@ -581,6 +619,8 @@ def build_tpex_announcement_actions(index: list[dict[str, Any]], manifests: dict
                     "limit_up": None,
                     "limit_down": None,
                     "adjustment_evidence": "publisher-exchange-ratio-only",
+                    "dividend_only_reference_price": None,
+                    "opening_auction_base": None,
                     "availability_reason": (
                         "publisher-announcement-date"
                         if announced
