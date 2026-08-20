@@ -38,6 +38,16 @@ TWSE_REDUCTION_DETAIL_URL = "https://www.twse.com.tw/rwd/zh/reducation/TWTAVUDet
 # request and should be the first stop for any future endpoint hunt.
 TWSE_PAR_VALUE_RESUME_URL = "https://www.twse.com.tw/rwd/zh/change/TWTB8U"
 TWSE_PAR_VALUE_FORECAST_URL = "https://www.twse.com.tw/rwd/zh/change/TWTB7U"
+# TPEx publishes no historical reduction or par-value table at all: its four
+# such endpoints (bulletin/revivt, decap, pvChgAnn, pvChgRslt) each ignore the
+# requested date and echo a rolling window of the next few days. The history
+# lives only in the market-announcement archive, which does take a real range
+# and whose category 2 covers 除權、除息、增資、減資、換股.
+TPEX_ANNOUNCEMENT_URL = "https://www.tpex.org.tw/www/zh-tw/bulletin/announcement"
+TPEX_ANNOUNCEMENT_DETAIL_URL = "https://www.tpex.org.tw/www/zh-tw/bulletin/annDetail"
+# Category 2 of the archive. The category list is published by the query page
+# itself as a select element, so this is read from the publisher, not assumed.
+TPEX_ANNOUNCEMENT_CORPORATE_CATEGORY = "2"
 
 M3_MARKET_STATUS_SOURCES = (
     RawSourceDefinition(
@@ -97,6 +107,20 @@ M3_MARKET_STATUS_SOURCES = (
         required_parameters=(("response", "json"),),
     ),
     RawSourceDefinition(
+        source_id="TPEX-ANNOUNCEMENT-HIST",
+        publisher="TPEX",
+        endpoint_id="market-announcement-history",
+        url_prefixes=(TPEX_ANNOUNCEMENT_URL,),
+        required_parameters=(("response", "json"),),
+    ),
+    RawSourceDefinition(
+        source_id="TPEX-ANNOUNCEMENT-DETAIL",
+        publisher="TPEX",
+        endpoint_id="market-announcement-detail",
+        url_prefixes=(TPEX_ANNOUNCEMENT_DETAIL_URL,),
+        required_parameters=(("response", "json"),),
+    ),
+    RawSourceDefinition(
         source_id="TPEX-STATUS-ATTENTION-HIST",
         publisher="TPEX",
         endpoint_id="trading-status-attention-history",
@@ -130,6 +154,14 @@ SOURCE_SPECS: dict[str, dict[str, object]] = {
         "url": TWSE_PAR_VALUE_FORECAST_URL,
         "calendar": "gregorian",
     },
+    # A third date format, and the only source so far needing an extra
+    # parameter beyond the range: ROC and plain YYYYMMDD are both rejected
+    # here with 日期參數錯誤.
+    "TPEX-ANNOUNCEMENT-HIST": {
+        "url": TPEX_ANNOUNCEMENT_URL,
+        "calendar": "gregorian-slash",
+        "extra_parameters": {"cate": TPEX_ANNOUNCEMENT_CORPORATE_CATEGORY},
+    },
 }
 
 
@@ -142,16 +174,23 @@ def build_m3_registry() -> RawSourceRegistry:
 def format_date(value: date, calendar: str) -> str:
     if calendar == "roc":
         return f"{value.year - 1911}/{value.month:02d}/{value.day:02d}"
+    if calendar == "gregorian-slash":
+        return value.strftime("%Y/%m/%d")
     return value.strftime("%Y%m%d")
 
 
 def request_parameters(source_id: str, start: date, end: date) -> dict[str, str]:
-    calendar = str(SOURCE_SPECS[source_id]["calendar"])
-    return {
+    spec = SOURCE_SPECS[source_id]
+    calendar = str(spec["calendar"])
+    parameters = {
         "response": "json",
         "startDate": format_date(start, calendar),
         "endDate": format_date(end, calendar),
     }
+    extra = spec.get("extra_parameters")
+    if isinstance(extra, dict):
+        parameters.update({str(k): str(v) for k, v in extra.items()})
+    return parameters
 
 
 def echoed_range_matches(payload: object, start: date, end: date) -> bool:
@@ -183,3 +222,13 @@ def detail_parameters(stk_no: str, file_date: str) -> dict[str, str]:
 
 def detail_period(stk_no: str, file_date: str) -> str:
     return f"detail:{stk_no}:{file_date}"
+
+
+def announcement_detail_parameters(content_file: str, doc_id: str) -> dict[str, str]:
+    """Request parameters for one archived market announcement."""
+
+    return {"response": "json", "content_file": content_file, "docId": doc_id}
+
+
+def announcement_detail_period(doc_id: str) -> str:
+    return f"announcement:{doc_id}"

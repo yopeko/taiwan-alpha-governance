@@ -308,6 +308,6 @@ class Warehouse:
 def default_warehouse() -> Warehouse:
     return Warehouse(
         Path(r"C:\tmp\tw-alpha-m3-pit-01"),
-        Path(r"C:\tmp\tw-alpha-m3-pit-prices-04"),
-        Path(r"C:\tmp\tw-alpha-m3-pit-status-07"),
+        Path(r"C:\tmp\tw-alpha-m3-pit-prices-05"),
+        Path(r"C:\tmp\tw-alpha-m3-pit-status-08"),
     )

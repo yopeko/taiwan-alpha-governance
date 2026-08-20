@@ -415,9 +415,82 @@ def build_par_value_actions(index: list[dict[str, Any]], manifests: dict[str, Pa
     return rows
 
 
+def build_tpex_announcement_actions(index: list[dict[str, Any]], manifests: dict[str, Path]):
+    """TPEx reductions and par-value changes as price-restatement rows.
+
+    The announcement states the exchange ratio but not the reference price the
+    exchange set on resumption — TPEx publishes that only for the next few
+    days, so for history it does not exist. The ratio alone does not determine
+    the reference price, so `adjustment_evidence` says so rather than letting a
+    consumer assume a full adjustment basis is present.
+    """
+
+    from build_status_fundamentals import (  # noqa: E402
+        TPEX_ANNOUNCEMENT_DETAIL_SOURCE,
+    )
+
+    rows: list[dict[str, Any]] = []
+    for record in index:
+        if record["source_id"] != TPEX_ANNOUNCEMENT_DETAIL_SOURCE:
+            continue
+        manifest_path = manifests.get(record["parse_run_id"])
+        if manifest_path is None:
+            continue
+        source_rows, _columns = parsed_rows(manifest_path)
+        for ordinal, source_row in enumerate(source_rows):
+            kind = str(source_row.get("change_kind") or "")
+            if kind not in ("capital-reduction", "par-value-change"):
+                continue
+            symbol = str(source_row.get("symbol") or "")
+            announced = str(source_row.get("announced_at") or "")
+            halt = str(source_row.get("halt_from") or "")
+            resumption = str(source_row.get("resumption_date") or "")
+            if not (symbol and halt and resumption):
+                continue
+            usable = bool(announced and announced <= halt < resumption)
+            per_share = source_row.get("shares_per_old_share")
+            per_thousand = source_row.get("shares_per_thousand_old_shares")
+            rows.append(
+                {
+                    "market": "TPEX",
+                    "symbol": symbol,
+                    "effective_date": resumption,
+                    "announced_at": announced if usable else "",
+                    "availability_basis": (
+                        "publisher-exact" if usable else "unknown-blocked"
+                    ),
+                    "action_type": kind.replace("-", "_"),
+                    "cash_dividend": None,
+                    "stock_dividend_ratio": None,
+                    "rights_ratio": None,
+                    "subscription_price": None,
+                    "reference_price": None,
+                    "prior_close": None,
+                    # Stated per share by par-value changes and per thousand by
+                    # reductions; recorded in the unit the publisher used.
+                    "adjustment_factor": (
+                        float(per_share)
+                        if per_share
+                        else (float(per_thousand) / 1000 if per_thousand else None)
+                    ),
+                    "limit_up": None,
+                    "limit_down": None,
+                    "adjustment_evidence": "publisher-exchange-ratio-only",
+                    "source_id": record["source_id"],
+                    "snapshot_id": record["snapshot_id"],
+                    "parse_run_id": record["parse_run_id"],
+                    "evidence_tier": record["evidence_tier"],
+                    "evidence_state": "verified-snapshot",
+                    "source_row_ordinal": ordinal,
+                }
+            )
+    return rows
+
+
 def build_actions(staging: Path, index: list[dict[str, Any]], manifests: dict[str, Path]):
     rows: list[dict[str, Any]] = build_reduction_actions(index, manifests)
     rows += build_par_value_actions(index, manifests)
+    rows += build_tpex_announcement_actions(index, manifests)
     for record in index:
         market = ACTION_SOURCES.get(record["source_id"])
         detail_market = ACTION_DETAIL_SOURCES.get(record["source_id"])

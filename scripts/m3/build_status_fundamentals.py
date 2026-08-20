@@ -34,6 +34,7 @@ RAW = Path(r"C:\project\tw-sepa-screener\data\raw_v2")
 TEJ_LANE = RAW / "m3_tej_licensed_2026-08-16"
 WINDOW = (date(2025, 1, 1), date(2026, 8, 3))
 
+TPEX_ANNOUNCEMENT_DETAIL_SOURCE = "TPEX-ANNOUNCEMENT-DETAIL"
 PAR_VALUE_SOURCES = {
     "TWSE-PAR-VALUE-RESUME-HIST",
     "TWSE-PAR-VALUE-FORECAST-HIST",
@@ -406,6 +407,90 @@ def build_par_value_changes(index, manifests):
     return events
 
 
+
+def build_tpex_announcement_halts(index, manifests):
+    """TPEx reductions and par-value changes, from the announcement archive.
+
+    TPEx publishes no historical table for either event: its four dedicated
+    endpoints all ignore the requested date and serve a rolling window of the
+    next few days. The archive is the only route to what happened last year,
+    and it happens to be the better one — each announcement carries its own
+    publication date, so unlike the TWSE par-value tables these are usable
+    point-in-time.
+
+    What the archive does *not* carry is the resumption reference price, which
+    TPEx publishes only for the next few days. The halt is therefore complete
+    and the price restatement is not; the exchange ratio the announcement does
+    state is kept so the size of the move is at least attributable.
+    """
+
+    events: list[dict[str, Any]] = []
+    for record in index:
+        if record["source_id"] != TPEX_ANNOUNCEMENT_DETAIL_SOURCE:
+            continue
+        manifest_path = manifests.get(record["parse_run_id"])
+        if manifest_path is None:
+            continue
+        for row in rows_of(manifest_path):
+            kind = str(row.get("change_kind") or "")
+            if kind not in ("capital-reduction", "par-value-change"):
+                continue
+            symbol = str(row.get("symbol") or "")
+            announced = str(row.get("announced_at") or "")
+            halt = str(row.get("halt_from") or "")
+            resumption = str(row.get("resumption_date") or "")
+            if not (symbol and halt and resumption):
+                # A follow-up announcement restates the outcome without the
+                # dates; the announcement that stopped trading carries them.
+                continue
+            # Same ordering guard as the TWSE halts: an announcement that does
+            # not precede its own halt means the row cannot say when the halt
+            # became knowable.
+            usable = bool(announced and announced <= halt < resumption)
+            events.append(
+                {
+                    "market": "TPEX",
+                    "symbol": symbol,
+                    "event_kind": kind,
+                    "announced_at": announced if usable else "",
+                    "effective_from": halt,
+                    # Inclusive interval, ending the day before trading resumes.
+                    "effective_to": _day_before(resumption),
+                    "altered_trading": False,
+                    "reason_text": (
+                        "變更股票面額" if kind == "par-value-change" else "減資"
+                    ),
+                    "measure_text": (
+                        f"resumption_date={resumption} "
+                        f"halt_to={row.get('halt_to')} "
+                        f"par_value={row.get('par_value_before')}->"
+                        f"{row.get('par_value_after')} "
+                        f"shares_per_old_share={row.get('shares_per_old_share')} "
+                        f"shares_per_thousand={row.get('shares_per_thousand_old_shares')} "
+                        f"document={row.get('document_number')}"
+                    )[:400],
+                    "availability_basis": (
+                        "publisher-exact" if usable else "unknown-blocked"
+                    ),
+                    "source_id": record["source_id"],
+                    "snapshot_id": record["snapshot_id"],
+                    "parse_run_id": record["parse_run_id"],
+                    "evidence_tier": record["evidence_tier"],
+                    "evidence_state": "verified-snapshot",
+                    "source_row_ordinal": int(row.get("source_row_ordinal") or 0),
+                }
+            )
+    for row in events:
+        row["record_id"] = sha(
+            {
+                k: str(row[k])
+                for k in ("market", "symbol", "event_kind", "effective_to", "snapshot_id")
+            }
+        )
+    events.sort(key=lambda r: (r["effective_to"], r["symbol"]))
+    return events
+
+
 def tej_announcements() -> dict[tuple[str, str], str]:
     """(symbol, period) -> publisher filing date, from the TEJ lane."""
 
@@ -495,7 +580,9 @@ def build(staging_root: Path, out_root: Path) -> dict[str, Any]:
     # one halt can arrive from several archives and would otherwise be counted
     # once per archive.
     halts = collapse_duplicates(
-        build_reductions(index, manifests) + build_par_value_changes(index, manifests)
+        build_reductions(index, manifests)
+        + build_par_value_changes(index, manifests)
+        + build_tpex_announcement_halts(index, manifests)
     )
     events = sorted(
         events + halts,
@@ -519,6 +606,12 @@ def build(staging_root: Path, out_root: Path) -> dict[str, Any]:
             },
             "altered_trading_rows": sum(1 for e in events if e["altered_trading"]),
             "with_announcement_date": sum(1 for e in events if e["announced_at"]),
+            "tpex_halt_rows": sum(
+                1
+                for e in events
+                if e["market"] == "TPEX"
+                and e["event_kind"] in ("capital-reduction", "par-value-change")
+            ),
             "par_value_change_rows": sum(
                 1 for e in events if e["event_kind"] == "par-value-change"
             ),

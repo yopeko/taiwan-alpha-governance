@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-PIT = Path(r"C:\tmp\tw-alpha-m3-pit-prices-04")
+PIT = Path(r"C:\tmp\tw-alpha-m3-pit-prices-05")
 
 
 def table(name: str):
@@ -108,6 +108,7 @@ class TestCorporateActionAvailability:
             "publisher-reference-price",
             "publisher-dividend-amount-only",
             "publisher-resumption-reference-price",
+            "publisher-exchange-ratio-only",
         }
         assert set(actions["adjustment_evidence"].to_pylist()) <= allowed
 
@@ -172,11 +173,47 @@ class TestCapitalReductionIsAlsoAnAction:
     """
 
     def reductions(self, actions):
+        """TWSE reductions only, because only TWSE publishes the prices.
+
+        TPEx reductions reach this table too, but from the announcement
+        archive, which states the exchange ratio and nothing about price: TPEx
+        publishes its resumption reference only for the next few days. The
+        price assertions below therefore apply to TWSE, and the difference is
+        carried explicitly by `adjustment_evidence` rather than by a null that
+        a reader has to interpret.
+        """
+
         types = actions["action_type"].to_pylist()
-        return [i for i, t in enumerate(types) if t == "capital_reduction"]
+        markets = actions["market"].to_pylist()
+        return [
+            i
+            for i, t in enumerate(types)
+            if t == "capital_reduction" and markets[i] == "TWSE"
+        ]
 
     def test_reductions_reach_the_action_table(self, actions):
-        assert self.reductions(actions), "no capital-reduction actions"
+        assert self.reductions(actions), "no TWSE capital-reduction actions"
+
+    def test_tpex_halts_declare_that_they_carry_no_reference_price(self, actions):
+        """The absence is a stated fact, not a gap to be filled in later.
+
+        Anyone adjusting TPEx prices across a reduction has to know the
+        exchange's own reference price is unavailable for history, so the row
+        says so instead of leaving four nulls to be guessed at.
+        """
+
+        markets = actions["market"].to_pylist()
+        types = actions["action_type"].to_pylist()
+        evidence = actions["adjustment_evidence"].to_pylist()
+        reference = actions["reference_price"].to_pylist()
+        rows = [
+            i
+            for i, t in enumerate(types)
+            if markets[i] == "TPEX" and t in ("capital_reduction", "par_value_change")
+        ]
+        assert rows, "no TPEx halt actions"
+        assert {evidence[i] for i in rows} == {"publisher-exchange-ratio-only"}
+        assert all(reference[i] is None for i in rows)
 
     def test_each_one_carries_the_resumption_reference_price(self, actions):
         """The reference is the whole point of the row.

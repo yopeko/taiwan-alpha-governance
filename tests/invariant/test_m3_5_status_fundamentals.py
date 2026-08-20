@@ -11,8 +11,8 @@ from pathlib import Path
 
 import pytest
 
-PIT = Path(r"C:\tmp\tw-alpha-m3-pit-status-07")
-PRICES = Path(r"C:\tmp\tw-alpha-m3-pit-prices-04")
+PIT = Path(r"C:\tmp\tw-alpha-m3-pit-status-08")
+PRICES = Path(r"C:\tmp\tw-alpha-m3-pit-prices-05")
 
 
 def table(name: str):
@@ -65,9 +65,14 @@ class TestMarketStatusAbsenceIsNotPermission:
         kinds = status["event_kind"].to_pylist()
         announced = status["announced_at"].to_pylist()
         basis = status["availability_basis"].to_pylist()
+        markets = status["market"].to_pylist()
         unexpected = sorted(
-            {kinds[i] for i, value in enumerate(announced) if not value}
-            - {"par-value-change"}
+            {
+                (markets[i], kinds[i])
+                for i, value in enumerate(announced)
+                if not value
+            }
+            - {("TWSE", "par-value-change")}
         )
         assert not unexpected, (
             f"these event kinds lost their announcement date: {unexpected}"
@@ -151,20 +156,47 @@ class TestCapitalReductionHalts:
                 "and is known to contain them"
             )
 
-    def test_par_value_changes_stay_blocked_until_an_announcement_exists(self, status):
-        """Neither published table gives a date, so none may claim one.
+    def test_twse_par_value_changes_stay_blocked_for_want_of_a_date(self, status):
+        """Neither TWSE table gives a date, so no TWSE row may claim one.
 
         The forecast detail serves only pending changes, so for anything
         already resumed there is no official statement of when it became
         knowable. Marking these usable would let a backtest act on a ten-to-one
         split before anyone could have known about it.
+
+        TPEx is the opposite case and is checked separately: its par-value
+        changes arrive as the announcement that published them.
         """
 
         kinds = status["event_kind"].to_pylist()
+        markets = status["market"].to_pylist()
         basis = status["availability_basis"].to_pylist()
-        rows = [i for i, kind in enumerate(kinds) if kind == "par-value-change"]
+        rows = [
+            i
+            for i, kind in enumerate(kinds)
+            if kind == "par-value-change" and markets[i] == "TWSE"
+        ]
         assert rows
         assert {basis[i] for i in rows} == {"unknown-blocked"}
+
+    def test_tpex_halts_are_usable_because_the_archive_dates_them(self, status):
+        """TPEx has no historical halt table, only its announcement archive.
+
+        That turns out to be the better source: every announcement carries its
+        own publication date, so these halts can inform an as-of query while
+        the TWSE par-value ones cannot.
+        """
+
+        kinds = status["event_kind"].to_pylist()
+        markets = status["market"].to_pylist()
+        basis = status["availability_basis"].to_pylist()
+        rows = [
+            i
+            for i, kind in enumerate(kinds)
+            if kind in self.HALT_KINDS and markets[i] == "TPEX"
+        ]
+        assert rows, "no TPEx halts"
+        assert {basis[i] for i in rows} == {"publisher-exact"}
 
     def test_every_reduction_has_both_ends_of_its_halt(self, status):
         starts = status["effective_from"].to_pylist()

@@ -26,6 +26,7 @@ import re
 from datetime import date
 from pathlib import Path
 from typing import Any, Mapping
+from urllib.parse import unquote
 
 import pyarrow as pa
 
@@ -771,6 +772,285 @@ M3_PAR_VALUE_PARSERS: tuple[ParserDefinition, ...] = (
 )
 
 
+ANNOUNCEMENT_SCHEMA = pa.schema(
+    [
+        pa.field("market", pa.string(), nullable=False),
+        pa.field("announced_at", pa.date32(), nullable=True),
+        pa.field("document_number", pa.string(), nullable=True),
+        pa.field("subject", pa.string(), nullable=True),
+        pa.field("content_file", pa.string(), nullable=True),
+        pa.field("doc_id", pa.string(), nullable=True),
+        pa.field("source_row_ordinal", pa.int32(), nullable=False),
+        pa.field("source_record_json", pa.string(), nullable=False),
+    ]
+)
+
+# The listing's last cell is the detail link; its two query parameters address
+# the announcement document. Read, not guessed: the detail page's own script
+# splits the same query string into content_file and docId.
+_ANN_LINK = re.compile(r"content_file=([^&\s\"']+)&(?:amp;)?docId=([^&\s\"']+)")
+
+
+def _announcement_listing_parse_fn(payload, _raw_manifest, _config) -> ParseBatch:
+    """Parse one page of the TPEx market-announcement archive.
+
+    This archive is the only official route to TPEx capital reductions and
+    par-value changes with history: the four dedicated TPEx endpoints all
+    ignore the requested date and serve a rolling window of the next few days.
+
+    Only the announcement's own metadata is taken here. What the announcement
+    says — halt dates, exchange ratio — lives in the detail document and is
+    parsed separately, so a truncated subject line is never read as if it were
+    the full text.
+    """
+
+    document = json.loads(payload.decode("utf-8-sig"))
+    rows: list[dict] = []
+    rejects: list[dict] = []
+    ordinal = 0
+    for fields, data in _tables(document):
+        names = [str(f) for f in fields]
+        i_date = _index_of(names, "資料日期")
+        i_number = _index_of(names, "發文字號")
+        i_subject = _index_of(names, "主旨")
+        i_detail = _index_of(names, "詳細資料")
+
+        for raw_row in data:
+            ordinal += 1
+            record = json.dumps(raw_row, ensure_ascii=False)
+
+            def cell(idx):
+                if idx is None or len(raw_row) <= idx:
+                    return None
+                return _clean(raw_row[idx])
+
+            announced = (
+                _roc_or_iso(raw_row[i_date])
+                if i_date is not None and len(raw_row) > i_date
+                else None
+            )
+            if announced is None:
+                rejects.append(
+                    {
+                        "source_row_ordinal": ordinal,
+                        "reject_reason": "row-has-no-announcement-date",
+                        "source_record_json": record,
+                    }
+                )
+                continue
+            link = _ANN_LINK.search(str(cell(i_detail) or ""))
+            # The link arrives percent-encoded because it is an href. The
+            # detail endpoint wants the decoded value, so it is normalised here
+            # rather than leaving every consumer to remember.
+            rows.append(
+                {
+                    "market": "TPEX",
+                    "announced_at": announced,
+                    "document_number": cell(i_number),
+                    "subject": cell(i_subject),
+                    "content_file": unquote(link.group(1)) if link else None,
+                    "doc_id": unquote(link.group(2)) if link else None,
+                    "source_row_ordinal": ordinal,
+                    "source_record_json": record,
+                }
+            )
+    rows.sort(key=lambda r: (str(r["announced_at"]), r["source_row_ordinal"]))
+    return ParseBatch(
+        rows=pa.Table.from_pylist(rows, schema=ANNOUNCEMENT_SCHEMA),
+        rejects=pa.Table.from_pylist(rejects, schema=REJECT_SCHEMA) if rejects else None,
+        diagnostics={
+            "parser_contract": PARSER_CONTRACT,
+            "row_count": len(rows),
+            "reject_count": len(rejects),
+        },
+    )
+
+
+ANNOUNCEMENT_DETAIL_SCHEMA = pa.schema(
+    [
+        pa.field("market", pa.string(), nullable=False),
+        pa.field("doc_id", pa.string(), nullable=True),
+        pa.field("announced_at", pa.date32(), nullable=True),
+        pa.field("document_number", pa.string(), nullable=True),
+        pa.field("symbol", pa.string(), nullable=True),
+        pa.field("change_kind", pa.string(), nullable=True),
+        pa.field("halt_from", pa.date32(), nullable=True),
+        pa.field("halt_to", pa.date32(), nullable=True),
+        pa.field("resumption_date", pa.date32(), nullable=True),
+        pa.field("par_value_before", pa.string(), nullable=True),
+        pa.field("par_value_after", pa.string(), nullable=True),
+        pa.field("shares_per_old_share", pa.string(), nullable=True),
+        pa.field("shares_per_thousand_old_shares", pa.string(), nullable=True),
+        pa.field("subject", pa.string(), nullable=True),
+        pa.field("source_row_ordinal", pa.int32(), nullable=False),
+        pa.field("source_record_json", pa.string(), nullable=False),
+    ]
+)
+
+# Every pattern below is anchored on the announcement's own numbered headings.
+# Anything that does not match becomes a null, never a guess: these are free
+# text, and a loose pattern here would invent a halt date.
+# Both 證券代號 and 股票代號 appear, sometimes with a trailing space inside the
+# brackets, and the two are used interchangeably for the same field.
+_ANN_SYMBOL = re.compile(r"(?:證券|股票)代號[：:]\s*(\d{4,6})")
+# The halt heading is written as 暫停…日期 or 停止…期間 depending on the drafter.
+# Both are the same fact; neither is inferred from anything else in the text.
+_ANN_HALT = re.compile(
+    r"(?:暫停|停止)股票(?:櫃檯|興櫃)?買賣(?:日期|期間)[：:]\s*"
+    r"(\d{2,3})年(\d{1,2})月(\d{1,2})日\s*至\s*(\d{2,3})年(\d{1,2})月(\d{1,2})日"
+)
+_ANN_RESUME = re.compile(
+    r"新股票開始(?:櫃檯|興櫃)?買賣日期[：:]\s*(\d{2,3})年(\d{1,2})月(\d{1,2})日"
+)
+_ANN_PAR = re.compile(
+    r"股票面額由每股\s*([0-9.]+)\s*元變更為\s*(?:每股\s*)?([0-9.]+)\s*元"
+)
+_ANN_RATIO = re.compile(r"每\s*1\s*股換發新股票\s*([0-9.]+)\s*股")
+# Reductions state the ratio per thousand shares, par-value changes per
+# share. Both are kept in the unit the publisher used; converting one into
+# the other here would bury a division inside a parser.
+_ANN_RATIO_K = re.compile(r"每\s*[仟千]\s*股換發新股票\s*([0-9.]+)\s*股")
+_ANN_DATE_DOC = re.compile(r"中華民國\s*(\d{2,3})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日")
+
+
+def _roc_parts(year: str, month: str, day: str) -> date | None:
+    try:
+        return date(int(year) + 1911, int(month), int(day))
+    except ValueError:
+        return None
+
+
+def _announcement_detail_parse_fn(payload, raw_manifest, _config) -> ParseBatch:
+    """Parse one archived TPEx announcement into the facts it states.
+
+    The announcement is prose, but a strongly templated one: the halt window,
+    the resumption date and the exchange ratio each sit behind their own
+    numbered heading. Each is matched on that heading alone. A document that
+    does not carry a heading yields null for it rather than a value scraped
+    from nearby text, because the cost of a wrong halt date is a security that
+    a backtest believes it could trade while the market was closed to it.
+
+    Note what is *not* here: the exchange publishes no resumption reference
+    price or price limits in these announcements. TPEx does publish them, but
+    only for the next few days, so for history they are simply unavailable.
+    """
+
+    document = json.loads(payload.decode("utf-8-sig"))
+    data = document.get("data")
+    if not isinstance(data, dict):
+        return ParseBatch(
+            rows=pa.Table.from_pylist([], schema=ANNOUNCEMENT_DETAIL_SCHEMA),
+            rejects=pa.Table.from_pylist(
+                [
+                    {
+                        "source_row_ordinal": 1,
+                        "reject_reason": "document-has-no-data-object",
+                        "source_record_json": json.dumps(document, ensure_ascii=False)[:2000],
+                    }
+                ],
+                schema=REJECT_SCHEMA,
+            ),
+            diagnostics={"parser_contract": PARSER_CONTRACT, "row_count": 0, "reject_count": 1},
+        )
+
+    parameters = raw_manifest.get("request_parameters") or {}
+    subject = str(data.get("subject") or "")
+    content = re.sub(r"<[^>]+>", " ", str(data.get("content") or ""))
+    content = re.sub(r"\s+", " ", content)
+    whole = f"{subject} {content}"
+
+    announced = None
+    stamped = _ANN_DATE_DOC.search(str(data.get("date") or ""))
+    if stamped:
+        announced = _roc_parts(*stamped.groups())
+
+    halt_from = halt_to = None
+    halt = _ANN_HALT.search(whole)
+    if halt:
+        halt_from = _roc_parts(*halt.groups()[:3])
+        halt_to = _roc_parts(*halt.groups()[3:])
+    resume = _ANN_RESUME.search(whole)
+    resumption = _roc_parts(*resume.groups()) if resume else None
+
+    par = _ANN_PAR.search(whole)
+    ratio = _ANN_RATIO.search(whole)
+    ratio_k = _ANN_RATIO_K.search(whole)
+    # Order matters, and so does specificity. A reduction announcement states
+    # the par value in passing ("每股面額新台幣10元"), so matching on 面額 alone
+    # files reductions as par-value changes. A withdrawal notice mentions both
+    # and describes an event that never happened, so it is named rather than
+    # left to fall through to whichever keyword appears first.
+    if "撤回" in subject:
+        change_kind = "withdrawn"
+    elif "面額變更" in whole or "變更股票面額" in whole:
+        change_kind = "par-value-change"
+    elif "減資" in whole:
+        change_kind = "capital-reduction"
+    else:
+        change_kind = None
+
+    symbol = _ANN_SYMBOL.search(whole)
+    row = {
+        "market": "TPEX",
+        "doc_id": str(parameters.get("docId") or "") or None,
+        "announced_at": announced,
+        "document_number": str(data.get("number") or "") or None,
+        "symbol": symbol.group(1) if symbol else None,
+        "change_kind": change_kind,
+        "halt_from": halt_from,
+        "halt_to": halt_to,
+        "resumption_date": resumption,
+        "par_value_before": par.group(1) if par else None,
+        "par_value_after": par.group(2) if par else None,
+        "shares_per_old_share": ratio.group(1) if ratio else None,
+        "shares_per_thousand_old_shares": ratio_k.group(1) if ratio_k else None,
+        "subject": subject[:600] or None,
+        "source_row_ordinal": 1,
+        "source_record_json": json.dumps(data, ensure_ascii=False)[:6000],
+    }
+    return ParseBatch(
+        rows=pa.Table.from_pylist([row], schema=ANNOUNCEMENT_DETAIL_SCHEMA),
+        rejects=None,
+        diagnostics={"parser_contract": PARSER_CONTRACT, "row_count": 1, "reject_count": 0},
+    )
+
+
+TPEX_ANNOUNCEMENT_PARSERS: tuple[ParserDefinition, ...] = (
+    ParserDefinition(
+        parser_id="tpex-market-announcement/1",
+        source_ids=("TPEX-ANNOUNCEMENT-HIST",),
+        endpoint_ids=("market-announcement-history",),
+        output_schema=ANNOUNCEMENT_SCHEMA,
+        primary_key=("market", "announced_at", "source_row_ordinal"),
+        sort_keys=("market", "announced_at", "source_row_ordinal"),
+        parse_fn=_announcement_listing_parse_fn,
+        code_resources=(_CODE_RESOURCE,),
+        default_config={
+            "parser_contract": PARSER_CONTRACT,
+            "security_scope": "four-digit-common-stock-v1",
+            "missing_value_policy": "preserved-not-filled",
+            "record_preservation": "canonical-source-record-json",
+        },
+    ),
+    ParserDefinition(
+        parser_id="tpex-market-announcement-detail/1",
+        source_ids=("TPEX-ANNOUNCEMENT-DETAIL",),
+        endpoint_ids=("market-announcement-detail",),
+        output_schema=ANNOUNCEMENT_DETAIL_SCHEMA,
+        primary_key=("market", "doc_id", "source_row_ordinal"),
+        sort_keys=("market", "doc_id", "source_row_ordinal"),
+        parse_fn=_announcement_detail_parse_fn,
+        code_resources=(_CODE_RESOURCE,),
+        default_config={
+            "parser_contract": PARSER_CONTRACT,
+            "security_scope": "four-digit-common-stock-v1",
+            "missing_value_policy": "preserved-not-filled",
+            "record_preservation": "canonical-source-record-json",
+        },
+    ),
+)
+
+
 def build_m3_parser_registry() -> ParserRegistry:
     """P0 formal parsers plus the M3 market-status parsers."""
 
@@ -780,4 +1060,5 @@ def build_m3_parser_registry() -> ParserRegistry:
         + M3_REDUCTION_PARSERS
         + (REDUCTION_DETAIL_PARSER,)
         + M3_PAR_VALUE_PARSERS
+        + TPEX_ANNOUNCEMENT_PARSERS
     )
