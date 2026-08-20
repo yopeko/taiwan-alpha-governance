@@ -82,6 +82,7 @@ AlphaMaster 不得直接寫入正式策略、紙上帳本或真實委託；AI �
 - [M4 台股規則與成本契約](docs/contracts/m4-market-rules-contract.md)
 - [M4.1 除權息日漲跌停由官方法規解決](docs/evidence/m4-1-ex-rights-limits-2026-08-19.md)
 - [M4.2 上游化至 Taiwan Core 與指紋異動](docs/evidence/m4-2-upstream-to-taiwan-core-2026-08-19.md)
+- [M5 現金／股票帳本](docs/evidence/m5-cash-share-ledger-2026-08-19.md)
 
 ## 已凍結的 M0 基線
 

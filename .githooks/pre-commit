@@ -21,9 +21,9 @@ if [ -z "$PYTHON" ]; then
   exit 1
 fi
 
-echo "pre-commit: M0 prohibitions, retry policy and M4 rules"
+echo "pre-commit: M0 prohibitions, retry policy, M4 rules and M5 ledger"
 PYTHONPATH="$REPO_ROOT" PYTHONIOENCODING=utf-8 \
-  "$PYTHON" -m pytest tests/unit tests/invariant m4/tests -q --no-header
+  "$PYTHON" -m pytest tests/unit tests/invariant m4/tests m5/tests -q --no-header
 
 echo "pre-commit: refusing zip archives (licensed vendor exports)"
 if git diff --cached --name-only --diff-filter=A | grep -qiE '\.zip$'; then

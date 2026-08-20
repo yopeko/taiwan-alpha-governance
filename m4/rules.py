@@ -16,7 +16,7 @@ Two locations, one file
 The canonical home is Taiwan Core, `tw_sepa_screener.market_rules`, because
 that is where the trading system will call it from. The governance repository
 keeps a byte-identical mirror at `m4/rules.py` and the two are asserted equal
-by `tests/invariant/test_m4_upstream_parity.py`.
+by `tests/invariant/test_upstream_parity.py`.
 
 The mirror exists for one reason: governance CI runs on a machine that has no
 Taiwan Core checkout, and these are the only M4 tests that need nothing but

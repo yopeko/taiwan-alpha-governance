@@ -30,11 +30,12 @@ PRODUCER_COMMIT = "fb87f62f8c2c68e2b85982cd102a35fd935bc0a4"
 #              2026-08-03 to 2026-08-19 records this one.
 #   898ef48a…  182 files.  M4 upstreamed: market_rules.py and its smoke test
 #              added to Taiwan Core.
+#   9820fd43…  184 files.  M5 upstreamed: ledger.py and its smoke test.
 #
 # Superseding the value here does not rewrite what an existing archive
 # recorded. Those are historical facts and stay as captured.
 SOURCE_STATE_FINGERPRINT = (
-    "898ef48aa2395e8c2d4e27e3e0a30a4d06c0c61ca90409cb32d65af92c585fc2"
+    "9820fd4372014951130ac81e1abfb0bfa768bd43ed215d09565fe47bea6c5001"
 )
 
 SOURCE_STATE_HISTORY: tuple[tuple[str, str], ...] = (
@@ -45,6 +46,10 @@ SOURCE_STATE_HISTORY: tuple[tuple[str, str], ...] = (
     (
         "898ef48aa2395e8c2d4e27e3e0a30a4d06c0c61ca90409cb32d65af92c585fc2",
         "M4 upstreamed to Taiwan Core",
+    ),
+    (
+        "9820fd4372014951130ac81e1abfb0bfa768bd43ed215d09565fe47bea6c5001",
+        "M5 upstreamed to Taiwan Core",
     ),
 )
 

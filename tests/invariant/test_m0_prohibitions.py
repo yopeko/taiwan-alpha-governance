@@ -264,10 +264,61 @@ def test_no_future_information_leaks_into_an_earlier_cutoff():
     assert not leaks, f"future-announced status leaked into an earlier cutoff: {leaks[:5]}"
 
 
-@pytest.mark.xfail(
-    reason="requires the M5 cash ledger, which is not built yet", strict=True
-)
 def test_no_impossible_trade_can_settle():
-    from m5_ledger import settle  # noqa: F401
+    """M0 section 6: an impossible trade must be impossible in the simulator.
 
-    raise AssertionError("unreachable until M5 exists")
+    This was an xfail for as long as there was no ledger to ask. The three
+    cases below are the ones a `position * return - cost` backtest cannot even
+    represent, let alone refuse.
+    """
+
+    from datetime import date
+    from decimal import Decimal
+
+    from m4.rules import Side
+    from m5.ledger import Ledger, MarketConditions, OrderRequest, TRADABLE_STATE
+
+    sessions = [date(2025, 1, d) for d in (2, 3, 6, 7, 8, 9, 10)]
+    book = Ledger(opening_cash=Decimal("10000"), sessions=sessions)
+
+    def order(side, quantity, price, fill_id):
+        return OrderRequest(
+            order_id=fill_id,
+            fill_id=fill_id,
+            session=sessions[0],
+            symbol="2330",
+            side=side,
+            quantity=quantity,
+            limit_price=Decimal(price),
+        )
+
+    def market(**overrides):
+        base = dict(
+            session=sessions[0],
+            session_is_open=True,
+            tradability_state=TRADABLE_STATE,
+        )
+        base.update(overrides)
+        return MarketConditions(**base)
+
+    # Selling what is not held is a short, which M0 forbids outright.
+    short = book.execute(order(Side.SELL, 1000, "50", "f1"), market())
+    assert short.state == "rejected"
+    assert short.reason == "no-position-to-sell"
+
+    # Spending money the account does not have.
+    too_big = book.execute(order(Side.BUY, 1000, "500", "f2"), market())
+    assert too_big.state == "rejected"
+    assert too_big.reason == "insufficient-buying-power"
+
+    # Trading a security the warehouse says was not tradable that session.
+    halted = book.execute(
+        order(Side.BUY, 1000, "50", "f3"), market(tradability_state="blocked")
+    )
+    assert halted.state == "rejected"
+    assert halted.reason == "not-tradable-blocked"
+
+    # None of the three moved a single NTD.
+    assert book.journal == []
+    assert book.settled_cash == Decimal("10000")
+    assert book.positions == {}
