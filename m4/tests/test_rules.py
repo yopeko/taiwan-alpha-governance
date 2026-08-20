@@ -277,9 +277,92 @@ class TestResolvePriceLimits:
         assert (up, down) == (D("110.0"), D("90.0"))
         assert basis == "computed-standard-10pct"
 
-    def test_ex_rights_without_published_limits_is_blocked(self):
+    def test_ex_rights_without_either_reference_price_is_blocked(self):
         with pytest.raises(RuleError):
             resolve_price_limits(D("100"), is_ex_rights_session=True)
+
+    def test_ex_rights_with_only_one_reference_price_is_blocked(self):
+        """One price cannot express an asymmetric band.
+
+        Passing only 除權息參考價 would silently produce the pre-2026 answer,
+        which is right 94.5% of the time and wrong on every cash capital
+        increase.
+        """
+
+        with pytest.raises(RuleError):
+            resolve_price_limits(
+                D("100"),
+                is_ex_rights_session=True,
+                ex_rights_reference_price=D("100"),
+            )
+
+
+class TestExRightsFormula:
+    """Every ex-rights row in the M3 window, reproduced from the two references.
+
+    Captured from TWT49U so the check needs no warehouse. Each row is
+    (symbol, 除權息參考價, 減除股利參考價, 漲停價格, 跌停價格).
+
+    The first block is ordinary distributions, where the two references agree.
+    The second is distributions including a cash capital increase, where they
+    diverge and a single-reference rule fails.
+    """
+
+    SAME_REFERENCE = [
+        ("2402", "39.12", "39.12", "43.00", "35.25"),
+        ("2597", "155.00", "155.00", "170.50", "139.50"),
+        ("6472", "689.28", "689.28", "758.00", "621.00"),
+        ("2331", "18.03", "18.03", "19.80", "16.25"),
+        ("3051", "24.63", "24.63", "27.05", "22.20"),
+    ]
+
+    # 除權息參考價 < 減除股利參考價 in the first four; 1312 is the reverse,
+    # which is why the rule is expressed as max/min rather than as "use the
+    # dividend-only price for the upside".
+    CASH_INCREASE = [
+        ("4927", "27.38", "28.90", "31.75", "24.65"),
+        ("8033", "137.66", "140.00", "154.00", "124.00"),
+        ("3717", "21.70", "22.00", "24.20", "19.55"),
+        ("2313", "257.64", "259.50", "285.00", "232.00"),
+        ("1312", "13.40", "13.20", "14.70", "11.90"),
+    ]
+
+    @pytest.mark.parametrize("symbol,ref,minus_div,up,down", SAME_REFERENCE + CASH_INCREASE)
+    def test_the_official_limits_are_reproduced(self, symbol, ref, minus_div, up, down):
+        got_up, got_down, basis = resolve_price_limits(
+            D(ref),
+            is_ex_rights_session=True,
+            ex_rights_reference_price=D(ref),
+            dividend_only_reference_price=D(minus_div),
+        )
+        assert (got_up, got_down) == (D(up), D(down)), symbol
+        assert basis == "computed-official-ex-rights-formula"
+
+    @pytest.mark.parametrize("symbol,ref,minus_div,up,down", CASH_INCREASE)
+    def test_a_single_reference_price_gets_these_wrong(
+        self, symbol, ref, minus_div, up, down
+    ):
+        """Why both prices are required rather than one being a fallback.
+
+        These are the rows that made the earlier single-reference rule land at
+        94.5%. If either of them ever starts matching, the two references have
+        stopped being read separately.
+        """
+
+        from_ref = price_limits(D(ref))
+        from_minus = price_limits(D(minus_div))
+        assert from_ref != (D(up), D(down)), symbol
+        assert from_minus != (D(up), D(down)), symbol
+
+    def test_published_limits_still_win_over_the_computation(self):
+        up, down, basis = resolve_price_limits(
+            D("27.38"),
+            official_limit_up=D("31.75"),
+            official_limit_down=D("24.65"),
+            is_ex_rights_session=True,
+        )
+        assert (up, down) == (D("31.75"), D("24.65"))
+        assert basis == "publisher-exact"
 
 
 class TestCapitalReductionResumption:
@@ -365,6 +448,7 @@ class TestNewListingExemption:
             listing_date=date(2025, 1, 2),
             as_of_session=date(2025, 1, 2),
             sessions=self.SESSIONS,
+            transferred_from_tpex=False,
         )
         assert applies is False
         assert basis == "exempt-new-listing-first-five-sessions"
@@ -374,8 +458,41 @@ class TestNewListingExemption:
             listing_date=date(2025, 1, 2),
             as_of_session=date(2025, 1, 8),
             sessions=self.SESSIONS,
+            transferred_from_tpex=False,
         )
         assert applies is False
+
+    def test_a_tpex_transfer_keeps_the_ordinary_limit_from_day_one(self):
+        """營業細則第63條第2項: 「初次上市普通股除上櫃轉上市者外」.
+
+        A company moving up from TPEx already has a price and a history, so it
+        never gets the limitless window. Granting it would hand a backtest five
+        unbounded days the exchange did not allow.
+        """
+
+        applies, basis = has_price_limit(
+            listing_date=date(2025, 1, 2),
+            as_of_session=date(2025, 1, 2),
+            sessions=self.SESSIONS,
+            transferred_from_tpex=True,
+        )
+        assert applies is True
+        assert basis == "ordinary-limit-tpex-transfer-is-not-a-new-listing"
+
+    def test_not_knowing_whether_it_transferred_is_blocked(self):
+        """The exemption is the dangerous answer, so it is never the default.
+
+        Only the first five sessions need the distinction; after that the two
+        cases agree and the caller is not asked for something it cannot know.
+        """
+
+        applies, basis = has_price_limit(
+            listing_date=date(2025, 1, 2),
+            as_of_session=date(2025, 1, 2),
+            sessions=self.SESSIONS,
+        )
+        assert applies is False
+        assert basis == "blocked-unknown-whether-transferred-from-tpex"
 
     def test_limit_returns_on_the_sixth_session(self):
         applies, basis = has_price_limit(

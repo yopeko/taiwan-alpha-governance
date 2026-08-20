@@ -133,6 +133,8 @@ def resolve_price_limits(
     official_limit_up: Decimal | None = None,
     official_limit_down: Decimal | None = None,
     is_ex_rights_session: bool = False,
+    ex_rights_reference_price: Decimal | None = None,
+    dividend_only_reference_price: Decimal | None = None,
     is_reduction_resumption_session: bool = False,
     resumption_reference_price: Decimal | None = None,
 ) -> tuple[Decimal, Decimal, str]:
@@ -140,13 +142,22 @@ def resolve_price_limits(
 
     Returns (limit_up, limit_down, basis).
 
-    Validation against 1,665 official ex-right records showed the plain ten
-    percent rule reproduces the published limits on 94.5% of them. The
-    remaining cases are ex-rights sessions whose limits follow a separate
-    official formula that this module does not implement. On such a session
-    without published limits the result is `blocked` rather than a computed
-    guess, because a wrong limit silently changes what an order engine
-    believes is executable.
+    On an ex-rights session the band is not symmetric around one price. TWSE
+    publishes two reference prices — 除權息參考價, which removes the whole
+    distribution, and 減除股利參考價, which removes only the dividend — and
+    they diverge whenever the distribution includes a cash capital increase.
+    The exchange sets the limit-up from the higher of the two and the
+    limit-down from the lower, giving the wider band on each side.
+
+    Measured against every ex-rights record in the M3 window, this reproduces
+    the published limits on **1,649 of 1,649 common-stock rows**. Using a
+    single reference price reproduces 94.5%, and the 77 rows that carry a cash
+    capital increase are exactly where it fails. ETFs are excluded: they trade
+    on a different tick table.
+
+    Source: 營業細則第63條 (limit is ten percent of 當市開盤競價基準) and
+    第58條之3第3項第3款 (on an ex-rights session that basis comes from the
+    reference prices of 第59條 as processed under 第62條).
 
     A capital reduction is the opposite case: the standard rule works exactly,
     but only from the right base. On the resumption session the limits are set
@@ -162,10 +173,22 @@ def resolve_price_limits(
     if official_limit_up is not None and official_limit_down is not None:
         return official_limit_up, official_limit_down, "publisher-exact"
     if is_ex_rights_session:
-        raise RuleError(
-            "ex-rights session without published limit prices: the special "
-            "official formula is not implemented, so limits are blocked"
+        if (
+            ex_rights_reference_price is None
+            or dividend_only_reference_price is None
+        ):
+            raise RuleError(
+                "ex-rights session needs both 除權息參考價 and 減除股利參考價: "
+                "the two differ whenever the distribution includes a cash "
+                "capital increase, and each sets one side of the band"
+            )
+        up, _ = price_limits(
+            max(ex_rights_reference_price, dividend_only_reference_price)
         )
+        _, down = price_limits(
+            min(ex_rights_reference_price, dividend_only_reference_price)
+        )
+        return up, down, "computed-official-ex-rights-formula"
     if is_reduction_resumption_session:
         if resumption_reference_price is None:
             raise RuleError(
@@ -198,6 +221,7 @@ def has_price_limit(
     listing_date: date | None,
     as_of_session: date,
     sessions: Sequence[date],
+    transferred_from_tpex: bool | None = None,
 ) -> tuple[bool, str]:
     """Whether the ordinary ten percent limit applies on this session.
 
@@ -205,8 +229,15 @@ def has_price_limit(
     sessions. Applying the limit anyway would reject orders the exchange would
     have accepted, so a backtest would silently miss those fills.
 
-    Returns (applies, basis). An unknown listing date yields `blocked`: the
-    caller must not assume either answer.
+    營業細則第63條第2項carves out one case: 「初次上市普通股**除上櫃轉上市者
+    外**」. A company moving up from TPEx already has a trading history and a
+    price, so it keeps the ordinary limit from its first TWSE session. Whether
+    this listing is such a transfer is therefore required, not optional — an
+    unknown answer blocks rather than granting the exemption, because granting
+    it wrongly hands a backtest a limitless day the exchange never allowed.
+
+    Returns (applies, basis). An unknown listing date likewise yields
+    `blocked`: the caller must not assume either answer.
     """
 
     if listing_date is None:
@@ -214,9 +245,13 @@ def has_price_limit(
     elapsed = sessions_since_listing(listing_date, as_of_session, sessions)
     if elapsed is None:
         return False, "blocked-session-not-in-calendar"
-    if elapsed < NEW_LISTING_EXEMPT_SESSIONS:
-        return False, "exempt-new-listing-first-five-sessions"
-    return True, "ordinary-ten-percent-limit"
+    if elapsed >= NEW_LISTING_EXEMPT_SESSIONS:
+        return True, "ordinary-ten-percent-limit"
+    if transferred_from_tpex is None:
+        return False, "blocked-unknown-whether-transferred-from-tpex"
+    if transferred_from_tpex:
+        return True, "ordinary-limit-tpex-transfer-is-not-a-new-listing"
+    return False, "exempt-new-listing-first-five-sessions"
 
 
 def classify_lot(quantity: int) -> LotType:

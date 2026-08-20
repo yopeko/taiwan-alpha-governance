@@ -48,6 +48,15 @@ TPEX_ANNOUNCEMENT_DETAIL_URL = "https://www.tpex.org.tw/www/zh-tw/bulletin/annDe
 # Category 2 of the archive. The category list is published by the query page
 # itself as a select element, so this is read from the publisher, not assumed.
 TPEX_ANNOUNCEMENT_CORPORATE_CATEGORY = "2"
+# The exchange's own regulation knowledge base, addressable per article.
+# M4 implements 第63條 (the ten percent band) and 第58條之3第3項第3款
+# (what that band is measured from on an ex-rights session), so the text of
+# both is archived rather than merely cited.
+TWSE_REGULATION_URL = (
+    "https://twse-regulation.twse.com.tw/TW/law/DOC01.aspx"
+)
+# 臺灣證券交易所股份有限公司營業細則.
+TWSE_OPERATING_RULES_CODE = "FL007304"
 
 M3_MARKET_STATUS_SOURCES = (
     RawSourceDefinition(
@@ -105,6 +114,13 @@ M3_MARKET_STATUS_SOURCES = (
         endpoint_id="par-value-change-forecast-history",
         url_prefixes=(TWSE_PAR_VALUE_FORECAST_URL,),
         required_parameters=(("response", "json"),),
+    ),
+    RawSourceDefinition(
+        source_id="TWSE-REGULATION-OPERATING-RULES",
+        publisher="TWSE",
+        endpoint_id="operating-rules-article",
+        url_prefixes=(TWSE_REGULATION_URL,),
+        required_parameters=(("FLCODE", TWSE_OPERATING_RULES_CODE),),
     ),
     RawSourceDefinition(
         source_id="TPEX-ANNOUNCEMENT-HIST",
@@ -232,3 +248,13 @@ def announcement_detail_parameters(content_file: str, doc_id: str) -> dict[str, 
 
 def announcement_detail_period(doc_id: str) -> str:
     return f"announcement:{doc_id}"
+
+
+def regulation_article_parameters(article: str) -> dict[str, str]:
+    """Request parameters for one article of the TWSE operating rules."""
+
+    return {"FLCODE": TWSE_OPERATING_RULES_CODE, "FLNO": article}
+
+
+def regulation_article_period(article: str) -> str:
+    return f"article:{TWSE_OPERATING_RULES_CODE}:{article}"

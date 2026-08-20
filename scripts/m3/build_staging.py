@@ -67,6 +67,11 @@ PROTECTED_PATHS = (
     Path(r"C:\project\tw-sepa-screener\data\raw"),
     Path(r"C:\project\tw-sepa-screener\data\stock_master.csv"),
     *ARCHIVES,
+    # The text of the rules M4 implements. Protected like an archive but
+    # deliberately outside ARCHIVES: nothing parses a regulation into rows,
+    # and listing it as staging input would leave a permanent entry in
+    # `sources_without_parser` that means nothing.
+    RAW / "m4_twse_operating_rules_2026-08-19",
     Path(r"E:\tw-sepa-screener-backup"),
 )
 
