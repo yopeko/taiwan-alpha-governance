@@ -74,6 +74,15 @@ TWSE_OPERATING_RULES_CODE = "FL007304"
 # Re-declaring them here made every URL resolve to two sources and the
 # capture failed closed, which is the registry doing its job. Check the P0
 # allowlist before adding a source: the gap was capture, not registration.
+#
+# These two genuinely are new. Each publishes one day of company material
+# announcements and nothing else, which is why they matter: TWSE has no
+# dated list of long-term trading suspensions anywhere, and MOPS -- where
+# the company's own announcement lives -- refuses programmatic access at the
+# WAF. A suspension announced from today onwards is caught here on the day
+# it happens. Nothing recovers the ones already past.
+TWSE_MATERIAL_DAILY_URL = "https://openapi.twse.com.tw/v1/opendata/t187ap04_L"
+TPEX_MATERIAL_DAILY_URL = "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap04_O"
 
 M3_MARKET_STATUS_SOURCES = (
     RawSourceDefinition(
@@ -159,6 +168,20 @@ M3_MARKET_STATUS_SOURCES = (
         endpoint_id="trading-status-attention-history",
         url_prefixes=(TPEX_ATTENTION_URL,),
         required_parameters=(("response", "json"),),
+    ),
+    RawSourceDefinition(
+        source_id="TWSE-MATERIAL-ANNOUNCEMENT-DAILY",
+        publisher="TWSE",
+        endpoint_id="material-announcement-daily",
+        url_prefixes=(TWSE_MATERIAL_DAILY_URL,),
+        required_parameters=(),
+    ),
+    RawSourceDefinition(
+        source_id="TPEX-MATERIAL-ANNOUNCEMENT-DAILY",
+        publisher="TPEX",
+        endpoint_id="material-announcement-daily",
+        url_prefixes=(TPEX_MATERIAL_DAILY_URL,),
+        required_parameters=(),
     ),
 )
 

@@ -93,6 +93,18 @@ SOURCES: tuple[dict[str, object], ...] = (
         "source_id": "TPEX-TRADING-SUSPENSION-HISTORY",
         "url": "https://www.tpex.org.tw/openapi/v1/tpex_spendi_history",
     },
+    # One day of company material announcements each. They are the only
+    # forward answer to a TWSE suspension: the exchange publishes no dated
+    # list of them and MOPS refuses programmatic access, so a suspension is
+    # observable only on the day it is announced. Missing a day loses it.
+    {
+        "source_id": "TWSE-MATERIAL-ANNOUNCEMENT-DAILY",
+        "url": "https://openapi.twse.com.tw/v1/opendata/t187ap04_L",
+    },
+    {
+        "source_id": "TPEX-MATERIAL-ANNOUNCEMENT-DAILY",
+        "url": "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap04_O",
+    },
 )
 
 
@@ -168,19 +180,51 @@ def fetch(
     return {"outcome": "transport-error", "attempts": retry_limit}, None
 
 
+def already_captured(root: Path) -> set[tuple[str, str]]:
+    """Which (source, snapshot day) pairs this root already holds.
+
+    Four of these six are current-state, so history exists only as one
+    snapshot per day and the script has to be safe to run every day. Skipping
+    what is already held keeps a re-run from asking the exchange twice, and
+    keeps a failed source retryable without disturbing the ones that worked.
+    """
+
+    done: set[tuple[str, str]] = set()
+    observations = root / "raw_observations"
+    if not observations.is_dir():
+        return done
+    for path in observations.rglob("manifest.json"):
+        try:
+            manifest = json.loads(path.read_bytes())
+        except (ValueError, OSError):
+            continue
+        if str(manifest.get("capture_status")) == "hash-verified":
+            done.add(
+                (str(manifest.get("source_id")), str(manifest.get("logical_period")))
+            )
+    return done
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out-root", type=Path, required=True)
     parser.add_argument("--retry-limit", type=int, default=4)
+    parser.add_argument(
+        "--snapshot-day",
+        help="override today's date; only for reproducing a past run",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="re-capture sources already held for this snapshot day",
+    )
     args = parser.parse_args(argv)
 
     out_root = Path(args.out_root)
-    if out_root.exists() and any(out_root.iterdir()):
-        raise SystemExit(f"output root must be empty: {out_root}")
     out_root.mkdir(parents=True, exist_ok=True)
 
     before = protected_fingerprints()
-    snapshot_day = date.today().isoformat()
+    snapshot_day = args.snapshot_day or date.today().isoformat()
     period = f"snapshot:{snapshot_day}"
 
     producer = {
@@ -192,13 +236,19 @@ def main(argv: list[str] | None = None) -> int:
     session = requests.Session()
     session.headers.update({"User-Agent": "tw-alpha-m3-trading-status/1.0"})
 
+    done = already_captured(out_root)
     results: list[dict[str, Any]] = []
     for spec in SOURCES:
+        source_id = str(spec["source_id"])
+        if not args.force and (source_id, period) in done:
+            results.append({"source_id": source_id, "outcome": "already-held"})
+            print(f"{source_id:34s} already-held")
+            continue
         outcome, _payload = fetch(
             store, spec, period, base_session=session, retry_limit=args.retry_limit
         )
         results.append({**{k: v for k, v in spec.items() if k != "params"}, **outcome})
-        print(f"{spec['source_id']:34s} {outcome.get('outcome')} rows={outcome.get('rows')}")
+        print(f"{source_id:34s} {outcome.get('outcome')} rows={outcome.get('rows')}")
 
     after = protected_fingerprints()
     manifest = {
@@ -224,12 +274,19 @@ def main(argv: list[str] | None = None) -> int:
     }
     if not manifest["protected_stores_unchanged"]:
         raise SystemExit("protected stores changed during capture; refusing to finish")
+    # One manifest per run, appended. Overwriting would erase the record of
+    # every previous day, which is the history this whole script exists to
+    # accumulate.
+    with (out_root / "capture_ledger.jsonl").open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(manifest, ensure_ascii=False, sort_keys=True) + "\n")
     (out_root / "capture_manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True),
         encoding="utf-8",
     )
     print(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True))
-    return 0 if all(r.get("outcome") == "captured" for r in results) else 1
+    return 0 if all(
+        r.get("outcome") in ("captured", "already-held") for r in results
+    ) else 1
 
 
 if __name__ == "__main__":

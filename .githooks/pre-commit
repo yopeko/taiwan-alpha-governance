@@ -25,9 +25,15 @@ echo "pre-commit: M0 prohibitions, retry policy, M4 rules and M5 ledger"
 PYTHONPATH="$REPO_ROOT" PYTHONIOENCODING=utf-8 \
   "$PYTHON" -m pytest tests/unit tests/invariant m4/tests m5/tests -q --no-header
 
-echo "pre-commit: refusing zip archives (licensed vendor exports)"
-if git diff --cached --name-only --diff-filter=A | grep -qiE '\.zip$'; then
-  echo "pre-commit: a .zip is staged. Licensed vendor exports must not be committed." >&2
+# Licensed vendor exports must not be committed or redistributed. This
+# checked only .zip while TEJ's company master arrives as .xlsx and its bulk
+# exports as UTF-16 .csv, so the rule matched the one shape nobody had sent.
+# The .gitignore carried the same gap. Checked on every staged file, not only
+# added ones: a file can be ignored today and staged deliberately tomorrow.
+echo "pre-commit: refusing licensed vendor exports"
+if git diff --cached --name-only | grep -qiE '\.(zip|xlsx|xls)$'; then
+  echo "pre-commit: a vendor export (.zip/.xlsx/.xls) is staged." >&2
+  echo "pre-commit: licensed data belongs in the raw_v2 lane, not in git." >&2
   exit 1
 fi
 
