@@ -156,7 +156,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--start", type=date.fromisoformat, required=True)
     parser.add_argument("--end", type=date.fromisoformat, required=True)
-    parser.add_argument("--interval", type=float, default=1.0)
+    # 6s floor: a 0.7s interval over a six-year backfill got this IP
+    # blocked from the whole of www.twse.com.tw, prices included, and the
+    # block outlasted a day. Politeness here is cheaper than a lockout.
+    parser.add_argument("--interval", type=float, default=6.0)
     parser.add_argument("--retry-limit", type=int, default=3)
     parser.add_argument(
         "--producer-commit", default=PRODUCER_COMMIT

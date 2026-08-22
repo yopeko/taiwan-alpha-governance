@@ -198,7 +198,10 @@ def main(argv: list[str] | None = None) -> int:
         required=True,
         help="captured reduction listing archive the detail keys come from",
     )
-    parser.add_argument("--interval", type=float, default=1.0)
+    # 6s floor: a 0.7s interval over a six-year backfill got this IP
+    # blocked from the whole of www.twse.com.tw, prices included, and the
+    # block outlasted a day. Politeness here is cheaper than a lockout.
+    parser.add_argument("--interval", type=float, default=6.0)
     parser.add_argument("--retry-limit", type=int, default=3)
     parser.add_argument(
         "--producer-commit", default=PRODUCER_COMMIT
