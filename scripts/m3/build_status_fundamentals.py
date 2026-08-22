@@ -248,6 +248,92 @@ def reduction_details(index, manifests) -> dict[tuple[str, str], dict[str, Any]]
     return details
 
 
+def build_full_cash_delivery() -> list[dict[str, Any]]:
+    """全額交割 intervals from the vendor company master.
+
+    A security on full-cash-delivery is not normally tradable: the buyer
+    deposits the cash and the seller the shares before the order is accepted.
+    The warehouse modelled attention, disposal, capital reduction and par
+    value change, but never this, and 10,004 sessions of it were reaching the
+    research dataset as plain `eligible`.
+
+    **Availability policy, needs Validation Owner ratification (contract
+    §4.2).** TEJ gives the interval but not the announcement date, and an
+    empty `announced_at` is knowable at no cutoff at all, so recording these
+    as `unknown-blocked` would put them in the table and change nothing. The
+    bound taken here is `announced_at = effective_from`: full-cash-delivery
+    is a standing trading condition rather than a point event, so on any
+    session inside the interval the security was visibly trading under it.
+    The claim is only that it was knowable no earlier than the day it took
+    effect, which cannot precede the exchange's own announcement.
+    """
+
+    from build_calendar_lifecycle import BOARD_MARKETS, board_legs, load_company_master
+
+    events: list[dict[str, Any]] = []
+    for ordinal, record in enumerate(load_company_master()):
+        symbol = str(record.get("symbol") or "")
+        if not symbol:
+            continue
+        legs = [leg for leg in board_legs(record) if leg["board"] in BOARD_MARKETS]
+        for index in (1, 2, 3):
+            start = _text(record.get(f"full_cash_delivery_from_{index}"))
+            if not start:
+                continue
+            end = _text(record.get(f"full_cash_delivery_to_{index}"))
+            # Which board was it on when the designation began? An interval
+            # that outlives a board change keeps the board it started on,
+            # which is the only one the vendor's dates can support.
+            market = ""
+            for leg in legs:
+                if leg["start"] <= start and (not leg["end"] or start < leg["end"]):
+                    market = BOARD_MARKETS[leg["board"]]
+                    break
+            if not market:
+                for leg in legs:
+                    if not leg["end"] or start < leg["end"]:
+                        market = BOARD_MARKETS[leg["board"]]
+                        break
+            if not market:
+                continue
+            events.append(
+                {
+                    "market": market,
+                    "symbol": symbol,
+                    "event_kind": "full-cash-delivery",
+                    "announced_at": start,
+                    "effective_from": start,
+                    # An open interval runs to the end of the window; the
+                    # designation had not been lifted by then.
+                    "effective_to": end or WINDOW[1].isoformat(),
+                    "altered_trading": True,
+                    "reason_text": "",
+                    "measure_text": "全額交割",
+                    "availability_basis": "approved-conservative-bound",
+                    "source_id": "TEJ-COMPANY-MASTER",
+                    "snapshot_id": str(record.get("snapshot_id") or ""),
+                    "parse_run_id": "",
+                    "evidence_tier": "vendor-ungated",
+                    "evidence_state": "licensed-vendor-snapshot",
+                    "source_row_ordinal": ordinal,
+                }
+            )
+    for row in events:
+        # Identity is the event, not the snapshot that carried it.
+        row["record_id"] = sha(
+            {
+                k: str(row[k])
+                for k in ("market", "symbol", "event_kind", "effective_from")
+            }
+        )
+    return events
+
+
+def _text(value: Any) -> str:
+    text = str(value or "").strip()
+    return "" if text.lower() in {"", ".", "-", "none", "null", "nan", "nat"} else text
+
+
 def build_reductions(index, manifests):
     """Reduction rows as market-status intervals, keyed by resumption date.
 
@@ -583,6 +669,7 @@ def build(staging_root: Path, out_root: Path) -> dict[str, Any]:
         build_reductions(index, manifests)
         + build_par_value_changes(index, manifests)
         + build_tpex_announcement_halts(index, manifests)
+        + build_full_cash_delivery()
     )
     events = sorted(
         events + halts,

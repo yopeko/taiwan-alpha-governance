@@ -11,8 +11,8 @@ from pathlib import Path
 
 import pytest
 
-PIT = Path(r"C:\tmp\tw-alpha-m3-pit-status-08")
-PRICES = Path(r"C:\tmp\tw-alpha-m3-pit-prices-07")
+PIT = Path(r"C:\tmp\tw-alpha-m3-pit-status-09")
+PRICES = Path(r"C:\tmp\tw-alpha-m3-pit-prices-09")
 
 
 def table(name: str):
@@ -87,13 +87,62 @@ class TestMarketStatusAbsenceIsNotPermission:
         )
 
     def test_availability_basis_matches_the_announcement_date(self, status):
+        """A date without a basis, or a basis without a date, is a lie.
+
+        `publisher-exact` means the publisher named the moment. The vendor
+        company master names a full-cash-delivery interval but no
+        announcement, so those rows carry the effective date under
+        `approved-conservative-bound` instead -- the weakest claim compatible
+        with the fact, since a standing restriction is visible on any session
+        it covers and cannot have been announced later than it took effect.
+        A dateless row stays `unknown-blocked` and is knowable at no cutoff.
+        """
+
         announced = status["announced_at"].to_pylist()
         basis = status["availability_basis"].to_pylist()
+        dated = {"publisher-exact", "approved-conservative-bound"}
         wrong = [
             i for i, value in enumerate(announced)
-            if bool(value) != (basis[i] == "publisher-exact")
+            if bool(value) != (basis[i] in dated)
         ]
         assert not wrong, f"{len(wrong)} rows disagree with their availability basis"
+
+    def test_a_conservative_bound_is_only_used_where_no_publisher_date_exists(
+        self, status
+    ):
+        """The bound is a fallback, not a shortcut past a real date.
+
+        Owner ratification pending (contract §4.2). Naming the event kinds
+        allowed to use it keeps a future source from reaching for it because
+        capturing the announcement was inconvenient.
+        """
+
+        kinds = status["event_kind"].to_pylist()
+        basis = status["availability_basis"].to_pylist()
+        sources = status["source_id"].to_pylist()
+        bounded = {
+            (kinds[i], sources[i])
+            for i, value in enumerate(basis)
+            if value == "approved-conservative-bound"
+        }
+        assert bounded <= {("full-cash-delivery", "TEJ-COMPANY-MASTER")}, (
+            f"unexpected use of the conservative bound: {sorted(bounded)}"
+        )
+
+    def test_a_conservative_bound_never_precedes_the_effect(self, status):
+        basis = status["availability_basis"].to_pylist()
+        announced = status["announced_at"].to_pylist()
+        starts = status["effective_from"].to_pylist()
+        early = [
+            i
+            for i, value in enumerate(basis)
+            if value == "approved-conservative-bound" and announced[i] < starts[i]
+        ]
+        assert not early, (
+            f"{len(early)} bounded rows claim knowability before the "
+            "restriction took effect, which is the one thing the bound must "
+            "never do"
+        )
 
     def test_disposal_events_keep_their_effective_interval(self, status):
         kinds = status["event_kind"].to_pylist()

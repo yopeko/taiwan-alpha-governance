@@ -20,3 +20,5 @@ desktop.ini
 # TEJ 授權廠商匯出檔：不得進入版本控制或對外散布
 *.zip
 tej_exports/
+*.xlsx
+*.xls

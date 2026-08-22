@@ -162,11 +162,27 @@ class TestFailClosed:
         assert set(result.by_tradability()) == {"ineligible"}
 
     def test_nothing_is_eligible_without_a_listing_date(self, warehouse):
+        """No listing date, no permission -- but a firmer refusal may win.
+
+        Same rule as absence from the closing table below: `ineligible` is a
+        stronger statement than `unknown`, not a weaker one. A security the
+        Owner has put out of scope is refused on that ground without anyone
+        needing to establish when it listed.
+        """
+
         result = warehouse.reconstruct(
             as_of_session="2025-06-16", decision_as_of="2025-06-16"
         )
         unknown = [s for s in result.securities if s.membership_state == "unknown"]
-        assert all(s.tradability_state == "unknown" for s in unknown)
+        assert unknown, "expected some securities with no usable listing date"
+        assert all(s.tradability_state != "eligible" for s in unknown)
+        # A firmer refusal may replace the vague one, but never a permission.
+        # Once the company master arrived, most of these stopped being
+        # "we do not know when it listed" and became "it was on a board that
+        # is out of scope", which is the same refusal said properly.
+        assert all(
+            s.tradability_state == "unknown" or s.reason_codes for s in unknown
+        )
 
     def test_absence_from_the_official_table_blocks_rather_than_permits(self, warehouse):
         result = warehouse.reconstruct(

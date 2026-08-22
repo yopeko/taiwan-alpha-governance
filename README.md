@@ -86,6 +86,8 @@ AlphaMaster 不得直接寫入正式策略、紙上帳本或真實委託；AI �
 - [M6 Phase 0：既有 SEPA 回測的誠實成本重算](docs/evidence/m6-phase0-cost-recompute-2026-08-20.md)
 - [M6 Phase 2：凍結研究資料集](docs/evidence/m6-phase2-research-dataset-2026-08-20.md)
 - [M6 Phase 3：帳本驅動的回測](docs/evidence/m6-phase3-ledger-backtest-2026-08-20.md)
+- [稽核：FinMind 免費層日線交叉驗證](docs/evidence/audit-finmind-crossvalidation-2026-08-21.md)
+- [M3 Owner 決定 D9：全額交割的 availability basis](docs/evidence/m3-owner-decision-d9-2026-08-22.md)
 
 ## 已凍結的 M0 基線
 

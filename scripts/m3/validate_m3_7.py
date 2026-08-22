@@ -27,9 +27,9 @@ from capture_window import protected_fingerprints  # noqa: E402
 RAW = Path(r"C:\project\tw-sepa-screener\data\raw_v2")
 LEGACY_DB = Path(r"C:\project\tw-sepa-screener\data\tw_sepa.duckdb")
 STAGING = Path(r"C:\tmp\tw-alpha-m3-staging-10")
-PIT_CAL = Path(r"C:\tmp\tw-alpha-m3-pit-01")
-PIT_PRICE = Path(r"C:\tmp\tw-alpha-m3-pit-prices-07")
-PIT_STATUS = Path(r"C:\tmp\tw-alpha-m3-pit-status-08")
+PIT_CAL = Path(r"C:\tmp\tw-alpha-m3-pit-04")
+PIT_PRICE = Path(r"C:\tmp\tw-alpha-m3-pit-prices-09")
+PIT_STATUS = Path(r"C:\tmp\tw-alpha-m3-pit-status-09")
 
 
 def file_sha(path: Path) -> str:

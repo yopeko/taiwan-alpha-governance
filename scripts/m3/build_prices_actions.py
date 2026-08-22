@@ -110,6 +110,64 @@ def classify_ohlc(row: dict[str, Any]) -> str:
     return OHLC_ABSENT
 
 
+# What the exchange said, as distinct from the lineage that carried it. Two
+# archives of one session agree on every one of these, or the session was
+# restated -- and a restatement is not a duplicate.
+OBSERVED = ("open", "high", "low", "close", "volume", "turnover", "ohlc_state")
+
+
+def collapse_quotes(
+    rows: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], int]:
+    """One row per (market, symbol, session), however many archives carried it.
+
+    Capture campaigns overlap. The M2 daily-price archives and the M3 window
+    capture both cover 2026-07-02 and 2026-07-31, so both carry those two
+    sessions in full, and 3,071 quotes were stored twice. Anything reading
+    this table directly counted their volume twice; the M6 export happened
+    not to, because it walks the calendar and takes one row per cell, so the
+    two defects hid each other until an independent source was asked.
+
+    This is the rule the status builder has always stated: the key is the
+    event itself, never the archive that carried it.
+
+    Disagreement is not de-duplicated. If two archives report different
+    numbers for one session then the exchange restated it, and picking a
+    winner here would silently decide something a later stage has to decide
+    explicitly -- the corporate-action table numbers its restatements for
+    exactly that reason. There are none today, so this fails closed rather
+    than guessing at a design for a case nobody has seen.
+    """
+
+    grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    for row in rows:
+        grouped.setdefault(
+            (row["market"], row["symbol"], row["session_date"]), []
+        ).append(row)
+
+    collapsed: list[dict[str, Any]] = []
+    conflicts: list[str] = []
+    duplicates = 0
+    for key, group in grouped.items():
+        if len(group) > 1:
+            observed = {tuple(str(row[field]) for field in OBSERVED) for row in group}
+            if len(observed) > 1:
+                conflicts.append(f"  {key}: {sorted(observed)}")
+                continue
+            duplicates += len(group) - 1
+        # A deterministic representative, so a rebuild keeps the same lineage.
+        collapsed.append(min(group, key=lambda row: row["snapshot_id"]))
+
+    if conflicts:
+        raise SystemExit(
+            f"{len(conflicts)} session(s) are reported differently by two "
+            "archives. That is a restatement, not a duplicate, and it needs a "
+            "revision ordinal like the corporate-action table has rather than "
+            "a silent winner:\n" + "\n".join(conflicts[:20])
+        )
+    return collapsed, duplicates
+
+
 def build_prices(staging: Path, index: list[dict[str, Any]], manifests: dict[str, Path]):
     rows: list[dict[str, Any]] = []
     state_counts: dict[str, int] = {}
@@ -135,12 +193,20 @@ def build_prices(staging: Path, index: list[dict[str, Any]], manifests: dict[str
             if not symbol:
                 continue
             state = classify_ohlc(source_row)
-            state_counts[state] = state_counts.get(state, 0) + 1
             rows.append(
                 {
                     "market": market,
                     "session_date": session.isoformat(),
                     "symbol": symbol,
+                    # The exchange's own short name, as printed in that
+                    # session's report. It is the only board marker the daily
+                    # tables carry -- TWSE suffixes 創 to every 創新板 short
+                    # name -- and taking it from the session's own snapshot
+                    # keeps the classification point-in-time, which today's
+                    # ISIN listing could not.
+                    "security_name": str(
+                        first_present(source_row, "name", "security_name") or ""
+                    ).strip(),
                     "open": first_present(source_row, "open", "open_price"),
                     "high": first_present(source_row, "high", "high_price"),
                     "low": first_present(source_row, "low", "low_price"),
@@ -160,12 +226,19 @@ def build_prices(staging: Path, index: list[dict[str, Any]], manifests: dict[str
                     "source_row_ordinal": ordinal,
                 }
             )
+    rows, collapsed = collapse_quotes(rows)
     for row in rows:
+        # The identity of a quote is the quote, not the archive that carried
+        # it. Hashing `snapshot_id` in here made a re-capture mint a record
+        # that de-duplication could not recognise as the same fact.
         row["record_id"] = sha(
-            {k: str(row[k]) for k in ("market", "session_date", "symbol", "snapshot_id")}
+            {k: str(row[k]) for k in ("market", "session_date", "symbol")}
         )
     rows.sort(key=lambda r: (r["session_date"], r["market"], r["symbol"]))
-    return rows, state_counts, sorted(columns_seen)
+    state_counts = {}
+    for row in rows:
+        state_counts[row["ohlc_state"]] = state_counts.get(row["ohlc_state"], 0) + 1
+    return rows, state_counts, sorted(columns_seen), collapsed
 
 
 # The TPEx detail observation is addressed by the announcement it came from,
@@ -733,7 +806,7 @@ def build(staging_root: Path, out_root: Path) -> dict[str, Any]:
     index = load_index(staging_root)
     manifests = parse_manifest_index(staging_root)
 
-    prices, ohlc_states, columns = build_prices(staging_root, index, manifests)
+    prices, ohlc_states, columns, collapsed = build_prices(staging_root, index, manifests)
     actions, action_stats = build_actions(staging_root, index, manifests)
 
     price_sha = write(out_root / "daily_prices_pit.parquet", prices)
@@ -753,6 +826,11 @@ def build(staging_root: Path, out_root: Path) -> dict[str, Any]:
             "distinct_sessions": len({r["session_date"] for r in prices}),
             "distinct_symbols": len({(r["market"], r["symbol"]) for r in prices}),
             "source_columns_seen": columns,
+            # How many quotes arrived from more than one archive. Not an
+            # error -- overlapping capture campaigns are expected -- but a
+            # number that should be explainable, and was 0 only because
+            # nothing was counting.
+            "duplicate_rows_collapsed": collapsed,
         },
         "corporate_actions_pit": {
             "rows": len(actions),
@@ -777,6 +855,10 @@ def build(staging_root: Path, out_root: Path) -> dict[str, Any]:
             "records which of the two the row rests on.",
             "A slot with several rows is a restatement; take the highest "
             "`revision_ordinal` whose `announced_at` is within the cutoff.",
+            "A quote is identified by (market, symbol, session_date) alone. "
+            "Overlapping capture campaigns carry the same session in several "
+            "archives; those collapse. Archives that disagree do not, and "
+            "fail the build.",
         ],
     }
     (out_root / "dataset_manifest.json").write_text(

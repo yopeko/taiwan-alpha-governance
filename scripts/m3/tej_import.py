@@ -56,6 +56,59 @@ MODULES: dict[str, dict[str, Any]] = {
         "resolve_listing_date": True,
         "deduplicate": True,
     },
+    # The company master, keyed on the company existing rather than on it
+    # reporting. The security-listing module above was fed a quarterly
+    # financials export, whose universe is "securities that filed", so it
+    # silently dropped companies that stopped filing -- and not filing is what
+    # gets a company delisted. This module carries no `market` column at all:
+    # TEJ's 上市別 is today's board, and reading a board from it would make
+    # every historical answer depend on where the security ended up. The
+    # dated board columns are kept raw and the builders derive intervals.
+    "company-master": {
+        "required": {
+            "symbol": ["證券代碼", "股票代號", "公司代碼", "coid", "symbol"],
+        },
+        "optional": {
+            "listing_date_tse": ["TSE上市日"],
+            "listing_date_otc": ["OTC上市日"],
+            "listing_date_reg": ["REG上市日"],
+            "listing_date_tib": ["創新版上市日", "創新板上市日"],
+            "delisting_date": ["下市日期", "下市日", "終止上市日"],
+            "security_name": ["公司中文簡稱", "證券名稱", "公司名稱"],
+            "board_today": ["上市別"],
+            # Full-cash-delivery, which TEJ gives as up to three intervals.
+            "full_cash_delivery_from_1": ["全額交割起日(一)"],
+            "full_cash_delivery_to_1": ["全額交割迄日(一)"],
+            "full_cash_delivery_from_2": ["全額交割起日(二)"],
+            "full_cash_delivery_to_2": ["全額交割迄日(二)"],
+            "full_cash_delivery_from_3": ["全額交割起日(三)"],
+            "full_cash_delivery_to_3": ["全額交割迄日(三)"],
+            # Board changes, most recent first, each with its own date.
+            "market_change_1": ["前一次變更市場"],
+            "market_change_1_date": ["前一次變更市場日期"],
+            "market_change_2": ["前二次變更市場"],
+            "market_change_2_date": ["前二次變更市場日期"],
+            "market_change_3": ["前三次變更市場"],
+            "market_change_3_date": ["前三次變更市場日期"],
+        },
+        "date_fields": [
+            "listing_date_tse",
+            "listing_date_otc",
+            "listing_date_reg",
+            "listing_date_tib",
+            "delisting_date",
+            "full_cash_delivery_from_1",
+            "full_cash_delivery_to_1",
+            "full_cash_delivery_from_2",
+            "full_cash_delivery_to_2",
+            "full_cash_delivery_from_3",
+            "full_cash_delivery_to_3",
+            "market_change_1_date",
+            "market_change_2_date",
+            "market_change_3_date",
+        ],
+        "key": ["symbol"],
+    },
     "financial-announcement": {
         "required": {
             "symbol": ["證券代碼", "股票代號", "公司代碼", "coid", "symbol"],
@@ -125,15 +178,23 @@ def file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def read_table(path: Path) -> pd.DataFrame:
+def read_table(path: Path) -> tuple[pd.DataFrame, list[dict[str, Any]]]:
     """Read a vendor export, sniffing encoding and separator.
 
     TEJ PRO exports UTF-16 tab-separated files with a .csv extension, so
     neither can be assumed from the suffix.
+
+    Returns the frame and any line the parser could not fit to the header.
+    A vendor export is allowed to contain a malformed row -- the company
+    master has one, where an unescaped separator inside a company name shifts
+    every field after it -- but the row has to come back as a recorded
+    rejection. Letting pandas drop it silently would delete a security from
+    the universe without anything saying so, which is the failure this whole
+    lane exists to prevent.
     """
 
     if path.suffix.lower() in {".xlsx", ".xls"}:
-        return pd.read_excel(path, dtype=str)
+        return pd.read_excel(path, dtype=str), []
 
     head = path.open("rb").read(65536)
     encodings = ["utf-8-sig", "cp950", "utf-8"]
@@ -146,10 +207,29 @@ def read_table(path: Path) -> pd.DataFrame:
             continue
         first = sample.splitlines()[0] if sample.splitlines() else ""
         separator = "\t" if first.count("\t") > first.count(",") else ","
+        malformed: list[dict[str, Any]] = []
+
+        def collect(fields: list[str]) -> None:
+            malformed.append(
+                {
+                    "reject_reasons": ["malformed-row:field-count"],
+                    "field_count": len(fields),
+                    "first_field": fields[0] if fields else "",
+                }
+            )
+
         try:
-            return pd.read_csv(path, sep=separator, dtype=str, encoding=encoding)
+            frame = pd.read_csv(
+                path,
+                sep=separator,
+                dtype=str,
+                encoding=encoding,
+                engine="python",
+                on_bad_lines=collect,
+            )
         except (UnicodeDecodeError, UnicodeError):
             continue
+        return frame, malformed
     raise ValueError(f"cannot decode {path.name}; re-export as UTF-8 CSV")
 
 
@@ -274,7 +354,7 @@ def main(argv: list[str] | None = None) -> int:
         overrides[field.strip()] = column.strip()
 
     module = MODULES[args.module]
-    frame = read_table(args.input)
+    frame, malformed = read_table(args.input)
     mapping, missing = resolve_columns(frame, module, overrides)
 
     report: dict[str, Any] = {
@@ -303,7 +383,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     rows: list[dict[str, Any]] = []
-    rejected: list[dict[str, Any]] = []
+    # Lines the parser could not fit to the header start out rejected, so
+    # they are counted and written out rather than quietly missing.
+    rejected: list[dict[str, Any]] = list(malformed)
     for ordinal, record in enumerate(frame.to_dict(orient="records")):
         out: dict[str, Any] = {"source_row_ordinal": ordinal}
         reasons: list[str] = []

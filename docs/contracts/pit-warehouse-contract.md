@@ -104,13 +104,56 @@ decision_available_at <= decision_as_of
 
 使用 `security_instance_id`，不可只用重複使用的 `symbol + market` 代表整個生命週期。事件包含上市、下市、改名、轉板、security type 與 master observation。官方缺上市日保留 `missing-at-source`；不得自動 eligible。
 
+#### 6.3.1 股票池的取數方式即是股票池的定義（Owner 裁決 D7，2026-08-22）
+
+生命週期**不得**由財報類匯出建立。財報匯出的母體是「在查詢期間內有申報財報的證券」，而**停止申報正是公司被下市的原因**——取數機制因此會系統性移除正在失敗的公司。3202 樺晟即為實例：它不在 13,748 列財報匯出的任何一列中，其 TEJ 紀錄載明危機事件為「財報未出具或遲交」。
+
+生命週期一律由**公司基本資料**（company master）建立，其鍵是「公司存在」而非「公司有申報」。
+
+市場歸屬**只能由帶日期的欄位推導**。廠商的 `上市別` 是今日的板別；以它判定歷史場次，會讓每一個歷史答案取決於該證券最後落腳何處（3202 今日為 PUB，而關鍵的二十年在 OTC）。
+
+#### 6.3.2 `security_board_intervals`
+
+保存每一檔證券**逐段的板別歸屬**（TSE／OTC／TIB／REG／ROTC／GISA），含起迄日與所屬市場。範圍判定一律讀本表，**不得**以交易所簡稱推斷板別：證交所雖對多數創新板證券加註「創」字尾，但並非全部——6902 GOGOLOOK 與 6794 向榮生技在創新板期間分別有 85 與 190 個場次以無字尾簡稱掛牌，僅憑名稱會放行 275 個場外場次。簡稱檢查降級為交叉核對。
+
 ### 6.4 `daily_prices_pit`
 
 保存 raw official price basis、`activity_scope`、`ohlc_state`、volume／turnover／transactions 及來源版本。historical／latest scope 衝突必須並存並由版本化 policy 選擇，禁止 last-write-wins。缺 OHLC 不補前值，也不能單憑 activity 推定 tradable。
 
+一筆報價的身分是 `market + symbol + session_date`，**不含 `snapshot_id`**。擷取活動會重疊（M2 日價封存與 M3 窗口擷取同時涵蓋 2026-07-02 與 2026-07-31），同一場次由多份封存帶來時必須收斂為一列。若兩份封存的觀測值**不一致**，那是 restatement 而非重複，建置必須 fail-closed 中止，不得逕自選一份。
+
+`security_name` 保存該場次官方報表印出的簡稱。它是日行情表唯一帶有的板別標記（`note` 欄位全數為空），且必須逐場次取用——證券轉板時會改名，用後來的名稱去判定早先的場次即為前視。
+
+#### 6.4.1 `volume` 的口徑逐市場不同（Owner 裁決 D2，2026-08-21）
+
+同一欄位在兩個市場裝著不同的東西，這是官方報表本身的差異，不是缺陷：
+
+| 市場 | 官方報表 | 含盤中零股 | 含盤後定價 |
+|---|---|---|---|
+| TWSE | 每日收盤行情 | **是** | 否 |
+| TPEX | 上櫃股票每日收盤行情**（不含定價）** | 否 | 否 |
+
+實測（M3 窗口全量）：TPEX 323,360 列成交量**全部**為 1,000 的整數倍；TWSE 395,962 列中僅 0.98% 是。
+
+裁決為維持現況、不做調和，因此下列限制為契約要求：
+
+- **跨市場的流動性門檻必須逐市場設定。** 單一門檻套用於兩市場會系統性排除上櫃股：低估中位數 1.86%、p90 達 10.88%。
+- 以第三方成交量校驗本表時，須先確認對方口徑。FinMind 的上櫃 `Trading_Volume` 含盤後定價，於 91.94% 的場次高於官方值。
+- 任何以 `volume` 推導的參與率、周轉率或流動性分數，必須記載其市場別假設。
+
+證據：[稽核：FinMind 免費層日線交叉驗證](../evidence/audit-finmind-crossvalidation-2026-08-21.md)。
+
 ### 6.5 `market_status_pit`
 
 保存 suspension、attention、disposal、altered-trading 等事件與已知區間。查無事件、source current-only、無 coverage 是不同狀態；absence 不等於 `tradable=true`。
+
+#### 6.5.1 全額交割（Owner 裁決 D8，2026-08-22）
+
+`event_kind = full-cash-delivery`，`altered_trading = true`。全額交割證券的買方須先繳足價金、賣方須先交付證券，委託才被接受，**不是正常交易條件**，判定為 `restricted`。
+
+**可用性政策，Owner 決定 D9 已批准（2026-08-22）。** 廠商提供區間但不提供公告日；`announced_at` 留空者於任何截止時點皆不可知（見 §7 `is_knowable`），將使本事件完全不生效。故採 `announced_at = effective_from`、`availability_basis = approved-conservative-bound`：全額交割是**持續狀態**而非突發事件，區間內任一場次該證券即以此方式交易、當日可見；本政策僅主張「不早於生效日可知」，而生效日不可能早於交易所公告日。
+
+**禁止**任何以 `approved-conservative-bound` 主張早於 `effective_from` 的可知性。
 
 ### 6.6 `corporate_actions_pit`
 

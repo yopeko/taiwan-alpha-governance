@@ -5,12 +5,12 @@
 | 欄位 | 值 |
 |---|---|
 | Contract ID | `tw-alpha-m3-source-map/1.2.0` |
-| Availability policy | `tw-alpha-m3-availability/1.1.0` |
+| Availability policy | `tw-alpha-m3-availability/1.2.0` |
 | Conflict policy | `tw-alpha-m3-conflict/1.0.0` |
 | Licensed-vendor policy | `tw-alpha-m3-licensed-vendor/1.0.0` |
 | 狀態 | `approved-for-M3-shadow-build` |
 | 建立日 | 2026-08-16 |
-| 最後更新 | 2026-08-19（v1.2.0 補正 §2.2 市場狀態與公司行動的 availability basis，納入 Owner 決定 D11）|
+| 最後更新 | 2026-08-22（availability policy v1.2.0，納入 Owner 決定 D9：全額交割的保守 bound）|
 | 上游 | [PIT warehouse contract](pit-warehouse-contract.md)、[M2 來源清冊](../m2-source-inventory.md) |
 | 涵蓋來源 | M2 durable archive 的 36 個 endpoint-level P0 sources |
 | 不涵蓋 | 交易成本、零股成交、帳本、策略評分（屬 M4 以後） |
@@ -193,6 +193,7 @@ v1.0.0 把「市場狀態」與「公司行動」各視為單一資料族。實�
 | **市場狀態**：處置／注意（TWSE punish、notice；TPEx disposal、attention）| `publisher-exact` | **是**，來源逐筆附 `公告日期` 欄位 |
 | **市場狀態**：減資停牌（TWTAUU + TWTAVUDetail）| `publisher-exact`，取 `FILE_DATE`；三日期未滿足 `公告 <= 停牌 < 恢復` 即退回 `unknown-blocked` | **是**，見 §2.2.1 |
 | **市場狀態**：面額變更停牌（TWTB8U）| `unknown-blocked` | 不適用——無任何來源提供公告日期 |
+| **市場狀態**：全額交割（TEJ 公司基本資料）| `approved-conservative-bound` = `effective_from`；見 §2.2.2 | **是**，限本政策定義的保守 bound |
 | **市場狀態**：停牌（一般）| 不在表中 | 不適用——依 D8 由價格缺漏推定，僅作為 reason code |
 | **公司行動**：TWSE 除權息（TWT49U）| `first-observed-only` | 否——端點完全不提供公告日期 |
 | **公司行動**：TPEx 除權息（MOPS 公告文件）| `publisher-exact`，取自 observation 的公告定址鍵 | **是**，每筆行動即以其公告為單位取得 |

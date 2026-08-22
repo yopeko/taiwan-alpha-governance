@@ -44,6 +44,43 @@ def _iso(value: Any) -> str:
     return str(value)
 
 
+# Boards outside the M0 universe, and the reason code each one earns. A
+# security is refused for the board it was on that session, never for the one
+# it is on today.
+OUT_OF_SCOPE_BOARDS = {
+    "TIB": "out-of-scope-innovation-board",
+    "REG": "out-of-scope-emerging-board",
+    "ROTC": "out-of-scope-emerging-board",
+    "GISA": "out-of-scope-go-incubation-board",
+    "PUB": "out-of-scope-public-but-unlisted",
+    "PSB": "out-of-scope-public-but-unlisted",
+    "UNPUB": "out-of-scope-public-but-unlisted",
+}
+
+
+def on_innovation_board(name: str) -> bool:
+    """Does the exchange's short name look like a 創新板 security?
+
+    Kept as a cross-check, never as the scope decision. TWSE suffixes 創 to
+    most innovation-board short names, and the test is on the segment after
+    the last hyphen because 緯創, 群創, 矽創, 榮創, 輝創 and 大統新創 are
+    ordinary listed companies whose names simply end in 創.
+
+    It is sound but incomplete, which is why the board interval decides
+    instead. Checked against the exchange's own board listing on 2026-08-21
+    it matched 30 of 30 with no false positive -- but that listing only ever
+    shows today, so the check itself could not see the securities that had
+    already left. 6902 GOGOLOOK and 6794 向榮生技 were quoted under plain
+    names for the 85 and 190 sessions before they moved to the main board,
+    and a name-based rule let all 275 through.
+    """
+
+    name = (name or "").strip()
+    if "-" not in name:
+        return False
+    return name.rsplit("-", 1)[1].endswith("創")
+
+
 @dataclass(frozen=True)
 class SecurityState:
     security_instance_id: str
@@ -91,7 +128,126 @@ class Warehouse:
         self._action_window = self._window_of(self.prices_root)
         self._status = self._parquet(self.status_root / "market_status_pit.parquet")
         self._coverage = self._parquet(self.status_root / "market_status_coverage.parquet")
+        self._names = self._name_history()
+        self._priced_securities = self._priced()
+        self._boards = self._board_history()
         self.dataset_id = self._dataset_id()
+
+    def _board_history(self) -> dict[str, list[dict[str, str]]]:
+        """Board intervals per symbol, or empty when the table is absent."""
+
+        path = self.calendar_root / "security_board_intervals.csv"
+        if not path.is_file():
+            return {}
+        history: dict[str, list[dict[str, str]]] = {}
+        with path.open(encoding="utf-8") as handle:
+            for row in csv.DictReader(handle):
+                history.setdefault(str(row["symbol"]), []).append(row)
+        for entries in history.values():
+            entries.sort(key=lambda r: r["effective_from"])
+        return history
+
+    def board_as_of(self, symbol: str, session: str) -> tuple[str, str]:
+        """(board, market) this security sat on that session.
+
+        Both empty when the master does not carry the security. The board is
+        "" with a market of "before-first-listing" or "after-last-listing"
+        when it does carry it but the session falls outside every interval,
+        which is a different answer from not knowing.
+        """
+
+        entries = self._boards.get(symbol, [])
+        if not entries:
+            return "", ""
+        for row in entries:
+            start, end = row["effective_from"], row["effective_to"]
+            if start and start > session:
+                continue
+            if end and session >= end:
+                continue
+            return row["board"], row["market"]
+        if session < entries[0]["effective_from"]:
+            return "", "before-first-listing"
+        return "", "after-last-listing"
+
+    def in_company_master(self, symbol: str) -> bool:
+        """Does the vendor's company master carry this security at all?
+
+        The master is keyed on there being a company. A security the exchange
+        quotes which has no company behind it is a fund, a note or a trust --
+        every one of the eight in this window is an ETF -- and M0 is common
+        shares only.
+        """
+
+        return symbol in self._boards
+
+    def _name_history(self) -> dict[tuple[str, str], list[tuple[str, str]]]:
+        """Every short name the exchange printed for a security, by session.
+
+        Kept as a history rather than one name per security because a name is
+        point-in-time too: a security that reaches the innovation board is
+        renamed when it gets there, and classifying an earlier session by a
+        later name would be lookahead in the classifier itself.
+        """
+
+        history: dict[tuple[str, str], list[tuple[str, str]]] = {}
+        for row in self._prices:
+            name = _iso(row.get("security_name"))
+            if not name:
+                continue
+            key = (str(row.get("market")), str(row.get("symbol")))
+            history.setdefault(key, []).append((_iso(row.get("session_date")), name))
+        for entries in history.values():
+            entries.sort()
+        return history
+
+    def _priced(self) -> dict[tuple[str, str], dict[str, str]]:
+        return {
+            (str(row.get("market")), str(row.get("symbol"))): {
+                "market": str(row.get("market")),
+                "symbol": str(row.get("symbol")),
+            }
+            for row in self._prices
+        }
+
+    def name_as_of(self, market: str, symbol: str, session: str) -> str:
+        """The most recent name printed on or before this session."""
+
+        entries = self._names.get((market, symbol)) or []
+        seen = ""
+        for when, name in entries:
+            if when > session:
+                break
+            seen = name
+        return seen
+
+    def _universe(
+        self, prices: dict[tuple[str, str], dict[str, Any]], markets: tuple[str, ...]
+    ) -> list[dict[str, Any]]:
+        """Lifecycle intervals, plus anything the exchange quoted regardless.
+
+        The lifecycle table comes from the licensed-vendor lane. Letting it
+        decide the universe means the vendor decides which securities exist,
+        and a security it does not cover disappears with its prices. It is
+        allowed to be silent; it is not allowed to be the reason a quote
+        vanishes.
+        """
+
+        rows = list(self._intervals)
+        known = {(row["market"], row["symbol"]) for row in rows}
+        for market, symbol in sorted(self._priced_securities):
+            if market in markets and (market, symbol) not in known:
+                rows.append(
+                    {
+                        "security_instance_id": "",
+                        "market": market,
+                        "symbol": symbol,
+                        "listing_date": "",
+                        "delisting_date": "",
+                        "lifecycle_state": "absent",
+                    }
+                )
+        return rows
 
     @staticmethod
     def _csv(path: Path) -> list[dict[str, str]]:
@@ -238,7 +394,7 @@ class Warehouse:
         action_covered = self._has_action_coverage(as_of_session)
 
         states: list[SecurityState] = []
-        for interval in self._intervals:
+        for interval in self._universe(prices, markets):
             market = interval["market"]
             if market not in markets:
                 continue
@@ -251,7 +407,14 @@ class Warehouse:
 
             listing = interval.get("listing_date") or ""
             delisting = interval.get("delisting_date") or ""
-            if not listing:
+            if interval.get("lifecycle_state") == "absent":
+                # The exchange quoted this security and the lifecycle source
+                # has never heard of it. Refusing to say anything is the one
+                # thing that must not happen: it is how 11,350 official price
+                # rows left the dataset without a trace.
+                membership = "unknown"
+                reasons.append("not-in-lifecycle-source")
+            elif not listing:
                 membership = "unknown"
                 reasons.append("listing-date-missing-at-source")
             elif as_of_session < listing:
@@ -315,11 +478,47 @@ class Warehouse:
                         reasons.append("action-not-announced-in-advance")
 
             # Fail closed: eligible only when every input is positively known.
-            if membership == "unknown":
+            board, board_market = self.board_as_of(symbol, as_of_session)
+            out_of_scope = OUT_OF_SCOPE_BOARDS.get(board)
+            if board_market in ("before-first-listing", "after-last-listing"):
+                # The master carries this security and puts it on no board
+                # that session. Saying so beats `unknown`, which is what a
+                # symbol-keyed lookup used to return for the TWSE leg of a
+                # security that had already moved to TPEx.
+                tradability = "ineligible"
+                reasons.append(
+                    "not-yet-on-any-board"
+                    if board_market == "before-first-listing"
+                    else "off-every-board"
+                )
+            elif board_market and board_market != market:
+                tradability = "ineligible"
+                reasons.append("not-on-this-market-this-session")
+            elif out_of_scope:
+                # Owner decision D1, 2026-08-21: boards other than 上市 and
+                # 上櫃 are out of M0 scope. Stated as a verdict with a reason
+                # rather than left out, because an absence reads exactly like
+                # the export bug this replaced. Decided on the board the
+                # security was on that session, from dated vendor fields --
+                # its board today is a different question.
+                tradability = "ineligible"
+                reasons.append(out_of_scope)
+            elif not self.in_company_master(symbol) and symbol.startswith("00"):
+                # Owner decision D3: quoted, but no company behind it. Both
+                # signals are required -- absence alone would silently drop a
+                # real company the vendor happened to miss, which is the exact
+                # failure that hid 3202.
+                tradability = "ineligible"
+                reasons.append("out-of-scope-etf-or-etn")
+            elif session_state != "official-open":
+                # Ahead of the membership checks, because a market that did
+                # not open is a fact and beats any gap in what we know about
+                # the security. Reaching `unknown` here would trade a definite
+                # refusal for a vague one.
+                tradability = "ineligible"
+            elif membership == "unknown":
                 tradability = "unknown"
             elif membership in {"not-yet-listed", "delisted"}:
-                tradability = "ineligible"
-            elif session_state != "official-open":
                 tradability = "ineligible"
             elif price_state == "absent-from-official-table":
                 tradability = "blocked"
@@ -389,7 +588,7 @@ class Warehouse:
 
 def default_warehouse() -> Warehouse:
     return Warehouse(
-        Path(r"C:\tmp\tw-alpha-m3-pit-01"),
-        Path(r"C:\tmp\tw-alpha-m3-pit-prices-07"),
-        Path(r"C:\tmp\tw-alpha-m3-pit-status-08"),
+        Path(r"C:\tmp\tw-alpha-m3-pit-04"),
+        Path(r"C:\tmp\tw-alpha-m3-pit-prices-09"),
+        Path(r"C:\tmp\tw-alpha-m3-pit-status-09"),
     )

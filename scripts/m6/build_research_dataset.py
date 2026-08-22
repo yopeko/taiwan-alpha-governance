@@ -289,6 +289,15 @@ def build(out_root: Path, *, sessions: int | None = None) -> dict[str, Any]:
             "exchange published limits only for sessions that restate a price.",
             "Warmup is the caller's problem. A 200-day average needs 200 "
             "sessions of this window before it means anything.",
+            "volume means different things per market. TWSE includes "
+            "intraday odd lots, TPEx is whole board lots only and excludes "
+            "the after-hours fixed-price session. Owner decision D2 keeps "
+            "both as published, so a liquidity threshold has to be set per "
+            "market or it quietly excludes TPEx names.",
+            "Every security the exchange quoted is here, including ones the "
+            "lifecycle source does not cover. They carry "
+            "not-in-lifecycle-source and are never eligible. Out of scope is "
+            "a verdict with a reason code, not an absence.",
         ],
     }
     (out_root / "dataset_manifest.json").write_text(

@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-PIT = Path(r"C:\tmp\tw-alpha-m3-pit-prices-07")
+PIT = Path(r"C:\tmp\tw-alpha-m3-pit-prices-09")
 
 
 def table(name: str):
@@ -75,6 +75,60 @@ class TestPricesAreRawAndUnfilled:
 
     def test_session_count_matches_the_calendar(self, prices):
         assert len(set(prices["session_date"].to_pylist())) == 382
+
+
+class TestAQuoteHasOneIdentity:
+    """A session's quote is one fact, however many archives carried it.
+
+    `record_id` used to be hashed over the snapshot as well as the natural
+    key, so the identity of an observation depended on which capture run
+    happened to fetch it. Re-running a capture then minted rows that
+    de-duplication could not recognise as the same fact. A FinMind
+    cross-validation found 3,071 such rows across two sessions, each of them
+    an exact copy, and anything reading the table directly counted their
+    volume twice.
+
+    The corporate-action side has had this rule since M3.4 and the status
+    builder states it outright: the key is the event itself, never the
+    archive that carried it. Prices were the one table that never got it.
+    """
+
+    def natural_keys(self, prices):
+        return list(
+            zip(
+                prices["market"].to_pylist(),
+                prices["symbol"].to_pylist(),
+                prices["session_date"].to_pylist(),
+            )
+        )
+
+    def test_a_security_is_quoted_once_per_session(self, prices):
+        counts: dict[tuple, int] = {}
+        for key in self.natural_keys(prices):
+            counts[key] = counts.get(key, 0) + 1
+        repeated = {key: n for key, n in counts.items() if n > 1}
+        sessions = sorted({key[2] for key in repeated})
+        assert not repeated, (
+            f"{len(repeated)} (market, symbol, session) keys appear more than "
+            f"once, on session(s) {sessions}; re-capturing a session must not "
+            "add a second row for the same quote"
+        )
+
+    def test_identity_does_not_depend_on_which_archive_carried_it(self, prices):
+        """One record_id per quote, so a re-capture collapses instead of adding.
+
+        Stated on the whole table rather than per group: if the hash still
+        took the snapshot, two archives of one session would yield two ids
+        and the count would exceed the number of quotes.
+        """
+
+        ids = set(prices["record_id"].to_pylist())
+        keys = set(self.natural_keys(prices))
+        assert len(ids) == len(keys), (
+            f"{len(ids)} record_ids for {len(keys)} distinct quotes; "
+            "record_id must be a function of (market, symbol, session_date) "
+            "alone"
+        )
 
 
 class TestCorporateActionAvailability:

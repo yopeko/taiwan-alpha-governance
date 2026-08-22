@@ -11,7 +11,8 @@ from pathlib import Path
 
 import pytest
 
-DATASET = Path(r"C:\tmp\tw-alpha-m6-dataset-02")
+DATASET = Path(r"C:\tmp\tw-alpha-m6-dataset-08")
+WAREHOUSE_PRICES = Path(r"C:\tmp\tw-alpha-m3-pit-prices-09\daily_prices_pit.parquet")
 
 
 def table():
@@ -28,6 +29,14 @@ def dataset():
 
 
 @pytest.fixture(scope="module")
+def warehouse():
+    if not WAREHOUSE_PRICES.is_file():
+        pytest.skip("price warehouse not built on this machine")
+    pq = pytest.importorskip("pyarrow.parquet")
+    return pq.read_table(WAREHOUSE_PRICES)
+
+
+@pytest.fixture(scope="module")
 def manifest():
     import json
 
@@ -35,6 +44,174 @@ def manifest():
     if not path.is_file():
         pytest.skip("research dataset not built on this machine")
     return json.loads(path.read_bytes())
+
+
+class TestNothingPricedIsDroppedInSilence:
+    """A security the exchange quoted must reach the dataset, or be refused.
+
+    The export walks the lifecycle table, which comes from the licensed-vendor
+    lane, so the universe was in effect defined by what that vendor covered.
+    Any security with official prices and no lifecycle row produced no row, no
+    reason code and no warning: 44 securities and 11,350 official price rows,
+    1.53% of the warehouse, gone without a trace. A FinMind cross-validation
+    is what noticed, because a warehouse checked only against its own sources
+    reports itself complete however much it is missing.
+
+    Two of those mattered on their own. 3202 樺晟 traded 57 sessions and then
+    delisted inside the window, and dropping exactly the securities that stop
+    existing is how survivorship bias gets in. 5236 凌陽創新 moved from TPEx
+    to TWSE on 2026-07-16, and its 14 TWSE sessions are the only ones in the
+    whole dataset where M4's transferred_from_tpex exception applies.
+
+    Being out of scope is a verdict, not an absence. It has to be visible.
+    """
+
+    def priced(self, warehouse):
+        return set(
+            zip(warehouse["market"].to_pylist(), warehouse["symbol"].to_pylist())
+        )
+
+    def exported(self, dataset):
+        return set(zip(dataset["market"].to_pylist(), dataset["symbol"].to_pylist()))
+
+    def test_every_priced_security_reaches_the_dataset(self, dataset, warehouse):
+        missing = sorted(self.priced(warehouse) - self.exported(dataset))
+        assert not missing, (
+            f"{len(missing)} securities have official prices but no row in the "
+            f"dataset: {missing[:12]}"
+        )
+
+    def test_a_delisted_security_is_kept_rather_than_erased(self, dataset, warehouse):
+        """The securities that stop existing are the ones bias needs kept."""
+
+        assert ("TPEX", "3202") in self.exported(dataset)
+
+    def phases(self, dataset, symbol, market):
+        rows = sorted(
+            (session, state)
+            for candidate, board, session, state in zip(
+                dataset["symbol"].to_pylist(),
+                dataset["market"].to_pylist(),
+                dataset["session_date"].to_pylist(),
+                dataset["tradability_state"].to_pylist(),
+            )
+            if candidate == symbol and board == market
+        )
+        assert rows, f"{symbol} has no rows at all"
+        return rows, {
+            state: [s for s, st in rows if st == state] for _, state in rows
+        }
+
+    def test_a_losing_security_can_actually_be_bought_before_it_dies(self, dataset):
+        """Present is not enough; a backtest has to be able to lose on it.
+
+        6806 森崴能源 is the case the universe has to contain. It was plainly
+        tradable from the first session of the window, fell 113.50 to 34.75,
+        and delisted on 2026-06-23. A universe drawn from filings keeps the
+        survivors and drops exactly this, so the drop never happens to anyone.
+
+        Eligible is the specific claim being made. A security that is only
+        *present* changes nothing: nothing trades an `unknown` or a
+        `restricted`, so a loser that never reaches `eligible` still cannot
+        cost a backtest a cent.
+        """
+
+        rows, by_state = self.phases(dataset, "6806", "TWSE")
+        eligible = by_state.get("eligible") or []
+        assert len(eligible) > 250, (
+            f"6806 is tradable on only {len(eligible)} sessions; it traded "
+            "normally for most of the window before delisting"
+        )
+        assert eligible[0] == "2025-01-02"
+        assert min(by_state.get("ineligible") or ["9999"]) == "2026-06-23"
+        assert max(rows)[1] == "ineligible"
+
+    def test_a_delisted_security_keeps_its_phases_in_order(self, dataset):
+        """3202 樺晟, whose three phases are three different claims.
+
+        Restricted from the first session, because it was on full-cash
+        delivery from 2024-11-19 and stayed there; then listed but absent
+        from the closing table, which is a suspension inferred rather than
+        observed; then delisted on 2025-07-21 and gone for good.
+
+        Those 57 sessions read `eligible` until 全額交割 was modelled, which
+        is why this is not the survivorship test any more: the security whose
+        loss a backtest can actually take is 6806 above. Being visible and
+        being tradable are separate properties and both have to be checked.
+        """
+
+        rows, by_state = self.phases(dataset, "3202", "TPEX")
+        assert not by_state.get("eligible"), (
+            "3202 was on full-cash delivery for every session it traded here; "
+            "eligible would claim it was available on normal terms"
+        )
+        restricted = by_state.get("restricted") or []
+        assert len(restricted) == 57
+        assert restricted[0] == "2025-01-02"
+        assert restricted[-1] == "2025-04-02"
+        assert min(by_state.get("blocked") or ["9999"]) == "2025-04-07"
+        assert min(by_state.get("ineligible") or ["9999"]) == "2025-07-21"
+        assert max(rows)[1] == "ineligible"
+
+    def test_full_cash_delivery_is_never_silently_normal(self, dataset):
+        """全額交割 is not a normal trading condition and must not read as one.
+
+        The buyer deposits the cash and the seller the shares before the
+        order is accepted. 10,004 sessions of it were reaching the dataset as
+        plain `eligible` because the warehouse modelled attention, disposal,
+        capital reduction and par value change but not this.
+        """
+
+        states = dataset["tradability_state"].to_pylist()
+        reasons = dataset["reason_codes"].to_pylist()
+        marked = [
+            i for i, reason in enumerate(reasons)
+            if "status-full-cash-delivery" in (reason or "")
+        ]
+        assert len(marked) > 5000, (
+            f"only {len(marked)} full-cash-delivery sessions reached the "
+            "dataset; the vendor master carries far more than that"
+        )
+        assert not [i for i in marked if states[i] == "eligible"]
+
+    def test_a_market_transfer_keeps_both_legs(self, dataset, warehouse):
+        exported = self.exported(dataset)
+        assert {("TPEX", "5236"), ("TWSE", "5236")} <= exported, (
+            "5236 transferred from TPEx to TWSE inside the window; the TWSE "
+            "leg carries the only sessions where the no-limit exception for a "
+            "transferred security applies"
+        )
+
+    def test_an_out_of_scope_security_is_refused_and_says_why(self, dataset):
+        """創新板 is excluded by Owner decision D1, which is a decision to state.
+
+        Silence would look identical to the bug this class exists to prevent.
+        """
+
+        symbols = dataset["symbol"].to_pylist()
+        reasons = dataset["reason_codes"].to_pylist()
+        states = dataset["tradability_state"].to_pylist()
+        rows = [i for i, s in enumerate(symbols) if s == "2258"]
+        assert rows, "no rows for an innovation-board security at all"
+        assert all(states[i] == "ineligible" for i in rows)
+        assert all("out-of-scope-innovation-board" in (reasons[i] or "") for i in rows)
+
+    def test_no_ordinary_share_is_mistaken_for_the_innovation_board(self, dataset):
+        """群創 and 緯創 end in 創 without being on it.
+
+        The marker is the suffix after the last hyphen, checked against the
+        exchange's own board listing. A naive endswith would have thrown six
+        listed companies, two of them large caps, out of the universe.
+        """
+
+        symbols = dataset["symbol"].to_pylist()
+        reasons = dataset["reason_codes"].to_pylist()
+        for symbol in ("3481", "3231", "8016", "3437", "6722", "1470"):
+            rows = [i for i, s in enumerate(symbols) if s == symbol]
+            assert rows, f"{symbol} is missing from the dataset entirely"
+            assert not any(
+                "out-of-scope-innovation-board" in (reasons[i] or "") for i in rows
+            ), f"{symbol} was wrongly classified as innovation board"
 
 
 class TestTheWarehouseVerdictSurvives:

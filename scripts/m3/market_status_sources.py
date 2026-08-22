@@ -58,6 +58,23 @@ TWSE_REGULATION_URL = (
 # 臺灣證券交易所股份有限公司營業細則.
 TWSE_OPERATING_RULES_CODE = "FL007304"
 
+# Trading-status and delisting sources are NOT defined here. All seven were
+# already in the M2 P0 allowlist and were simply never captured for M3:
+#
+#   TWSE-DELISTING                   終止上市公司, historical
+#   TPEX-DELISTING-HIST              下櫃公司, historical
+#   TWSE-TRADING-SUSPENSION          TWTAWU, current-only, short halts
+#   TWSE-TRADING-ALTERED-TRADING     TWT85U, current-only
+#   TPEX-TRADING-SUSPENSION-TODAY    current-only, short halts
+#   TPEX-TRADING-SUSPENSION-HISTORY  historical, short halts
+#   TPEX-TRADING-ALTERED-TRADING     tpex_cmode, current-only, and the only
+#                                    endpoint on either exchange stating a
+#                                    long-term suspension as a flag
+#
+# Re-declaring them here made every URL resolve to two sources and the
+# capture failed closed, which is the registry doing its job. Check the P0
+# allowlist before adding a source: the gap was capture, not registration.
+
 M3_MARKET_STATUS_SOURCES = (
     RawSourceDefinition(
         source_id="TWSE-STATUS-PUNISH-HIST",
