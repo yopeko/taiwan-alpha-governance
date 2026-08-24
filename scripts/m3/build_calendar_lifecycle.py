@@ -53,7 +53,7 @@ TEJ_MASTER_LANE = RAW / "m3_tej_master_2026-08-22"
 # leg on one board and TEJ records only the surviving one -- so this is not
 # merely corroboration, it closes three intervals nothing else closes.
 TRADING_STATUS_CAPTURE = Path(r"C:\tmp\tw-alpha-m3-trading-status-01")
-WINDOW_START = date(2025, 1, 1)
+WINDOW_START = date(2019, 1, 1)
 WINDOW_END = date(2026, 8, 3)
 MARKETS = ("TWSE", "TPEX")
 
@@ -246,17 +246,31 @@ def apply_official_delistings(
     """
 
     official = load_official_delistings()
-    stats = {"agreed": 0, "filled": 0, "conflicts": []}
+    stats = {"agreed": 0, "filled": 0, "skipped_earlier_life": 0, "conflicts": []}
+
+    # A symbol is not an identity. 2432 was delisted on 2008-09-01, and the
+    # code was later reissued to a company still trading; the exchange's list
+    # carries only the symbol and the date, so matching it to whichever
+    # interval happens to be last would attribute a 2008 delisting to a
+    # security first listed years afterwards. The official record belongs to
+    # the life that was open on that date, or to none of ours.
     latest: dict[tuple[str, str], dict[str, Any]] = {}
     for row in intervals:
         key = (row["market"], row["symbol"])
+        record = official.get(key)
+        if record and row["listing_date"] > record["delisting_date"]:
+            continue
         current = latest.get(key)
         if current is None or row["listing_date"] > current["listing_date"]:
             latest[key] = row
 
-    for key, row in latest.items():
-        record = official.get(key)
-        if not record:
+    for key, record in official.items():
+        row = latest.get(key)
+        if row is None:
+            # Every interval we hold for this symbol starts after the
+            # exchange closed the life it is describing.
+            if any(r["market"] == key[0] and r["symbol"] == key[1] for r in intervals):
+                stats["skipped_earlier_life"] += 1
             continue
         theirs = record["delisting_date"]
         ours = row.get("delisting_date") or ""

@@ -49,7 +49,7 @@ ACTION_DETAIL_SOURCES = {"MOPS-TPEX-ACTIONS-DETAIL": "TPEX"}
 # never defines which events exist.
 RAW_V2 = Path(r"C:\project\tw-sepa-screener\data\raw_v2")
 TEJ_DIVIDEND_LANE = RAW_V2 / "m3_tej_dividends_2026-08-19"
-WINDOW = (date(2025, 1, 1), date(2026, 8, 3))
+WINDOW = (date(2019, 1, 1), date(2026, 8, 3))
 
 OHLC_COMPLETE = "complete"
 OHLC_SOURCE_NO_REGULAR = "source-reported-no-regular-ohlc"
@@ -245,8 +245,14 @@ def build_prices(staging: Path, index: list[dict[str, Any]], manifests: dict[str
 # and that is the only place its announcement date survives: the parsed
 # document itself carries the ex-date and the amounts but not the date the
 # announcement was published.
+# The `:src:` suffix carries the MOPS record's own DATE1 and SEQ_NO, added
+# once it turned out that `(symbol, announced)` collides: a company may
+# publish two announcements on a day, and two records with different DATE1
+# may parse to the same announced date. Optional, because the two lanes
+# captured before that fix hold the older, coarser key and must keep parsing.
 TPEX_DETAIL_PERIOD = re.compile(
     r"company:TPEX:(?P<symbol>\d{4,6}):announced:(?P<announced>\d{4}-\d{2}-\d{2})"
+    r"(?::src:(?P<src>\d{8}-\d+))?"
 )
 
 # What makes two rows the same corporate action. Deliberately includes the

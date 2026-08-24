@@ -61,6 +61,27 @@ ARCHIVES = (
     RAW / "m3_reduction_detail_2025-2026",
     RAW / "m3_par_value_2025-01-01_2026-08-03",
     RAW / "m3_tpex_announcements_2025-01-01_2026-08-03",
+    # 2019-2024 backfill. The window was 382 sessions, of which a 250-session
+    # warmup left about 132 usable -- roughly ten trades for the M6 probe,
+    # which cannot decide anything about a strategy. Six more years is what
+    # makes the pipeline's output worth reading.
+    #
+    # Prices alone would not have done it: the as-of reconstruction refuses a
+    # session with no market-status or corporate-action coverage, so every
+    # backfilled session would have come back `unknown`. All five families
+    # are captured for the same range for that reason.
+    RAW / "m3_window_2019-01-01_2024-12-31",
+    RAW / "m3_market_status_2019-01-01_2024-12-31",
+    RAW / "m3_actions_2019-01-01_2024-12-31",
+    RAW / "m3_reduction_2019-01-01_2024-12-31",
+    RAW / "m3_reduction_detail_2019-2024",
+    RAW / "m3_tpex_announcements_2019-01-01_2024-12-31",
+    # Captured last and separately, because TPEx publishes no range endpoint
+    # for ex-right history: MOPS answers one symbol-year at a time, so this
+    # lane cost 4,310 requests where the others cost dozens. Without it every
+    # TPEx session from 2019 to 2023 stays `unknown`, and the backfill would
+    # have bought six years of TWSE and two of TPEx.
+    RAW / "m3_tpex_actions_2019-2023",
 )
 
 # Publishing anywhere at or inside these is forbidden.

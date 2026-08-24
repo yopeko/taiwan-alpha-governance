@@ -32,7 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 SCHEMA_ID = "tw-alpha-m3-status-fundamentals/1.0.0"
 RAW = Path(r"C:\project\tw-sepa-screener\data\raw_v2")
 TEJ_LANE = RAW / "m3_tej_licensed_2026-08-16"
-WINDOW = (date(2025, 1, 1), date(2026, 8, 3))
+WINDOW = (date(2019, 1, 1), date(2026, 8, 3))
 
 TPEX_ANNOUNCEMENT_DETAIL_SOURCE = "TPEX-ANNOUNCEMENT-DETAIL"
 PAR_VALUE_SOURCES = {

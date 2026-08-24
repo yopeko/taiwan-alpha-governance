@@ -16,8 +16,9 @@ outcome as evidence either way.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
-from typing import Mapping
+from typing import Any, Callable, Mapping
 
 # Transient at the transport or server layer. A 4xx other than 429 means the
 # request itself is wrong, so repeating it unchanged is pointless.
@@ -94,3 +95,37 @@ def status_of(exception: BaseException) -> int | None:
 def headers_of(exception: BaseException) -> Mapping[str, str] | None:
     response = getattr(exception, "response", None)
     return getattr(response, "headers", None) if response is not None else None
+
+
+def request_with_retry(
+    policy: RetryPolicy,
+    send: Callable[[int], Any],
+    *,
+    retry_on: type[BaseException] | tuple[type[BaseException], ...] = Exception,
+    sleep: Callable[[float], None] = time.sleep,
+) -> tuple[Any, int]:
+    """Run `send(attempt)` under `policy`; return its result and the attempt count.
+
+    Exists because centralising the *decision* was not enough. The policy
+    above was written after the TPEx action capture retried its listing
+    request and not its detail requests, yet the detail call site still had
+    no retry: an object every request kind may consult is not the same as a
+    path every request kind must take.
+
+    Keeps the module's promise not to swallow anything. When the attempts are
+    exhausted, or the status says repeating the request is pointless, the
+    original exception is re-raised for the caller to record as evidence.
+
+    `send` receives the 1-based attempt number, because a capture has to put
+    it in the transport context it records.
+    """
+
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            return send(attempt), attempt
+        except retry_on as exc:
+            if not policy.should_retry(attempt=attempt, status=status_of(exc)):
+                raise
+            sleep(policy.delay_for(attempt=attempt, headers=headers_of(exc)))
