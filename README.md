@@ -40,6 +40,8 @@ shadow -> paper -> human-approved canary -> formal
 
 AlphaMaster 不得直接寫入正式策略、紙上帳本或真實委託；AI 分析不得進入自動評分、升級或下單路徑。
 
+衡量規模與執行規模的分離見 [ADR-0002](docs/adr/0002-measurement-scale-separate-from-execution-scale.md)（**Accepted，2026-08-25**）：M0 §8 的 NT$10,000 × 2 名額是執行組態，不是衡量組態；在該規模下產生的報酬數字不得作為策略優劣的證據。其在帳本上的實作見 [M5 手續費折讓變更說明](docs/m5-fee-rebate-change-spec.md)（**Proposed**）：券商折讓為先收後退，同一筆成交因而有實扣與淨額兩個成本，應收退款計入 NAV 但不計入購買力。
+
 ## 核心契約
 
 - [研究資料集契約](docs/contracts/research-dataset-contract.md)
