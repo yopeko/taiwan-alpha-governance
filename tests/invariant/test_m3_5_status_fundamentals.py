@@ -11,31 +11,27 @@ from pathlib import Path
 
 import pytest
 
-PIT = Path(r"C:\tmp\tw-alpha-m3-pit-status-09")
-PRICES = Path(r"C:\tmp\tw-alpha-m3-pit-prices-09")
+import sys
 
+REPO = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO / "tests"))
 
-def table(name: str):
-    path = PIT / name
-    if not path.is_file():
-        pytest.skip(f"{name} not built on this machine")
-    pq = pytest.importorskip("pyarrow.parquet")
-    return pq.read_table(path)
+from warehouse import PRICES, STATUS, load_table  # noqa: E402
 
 
 @pytest.fixture(scope="module")
-def status():
-    return table("market_status_pit.parquet")
+def status(request):
+    return load_table(request, STATUS, "market_status_pit.parquet")
 
 
 @pytest.fixture(scope="module")
-def coverage():
-    return table("market_status_coverage.parquet")
+def coverage(request):
+    return load_table(request, STATUS, "market_status_coverage.parquet")
 
 
 @pytest.fixture(scope="module")
-def fundamentals():
-    return table("fundamentals_pit.parquet")
+def fundamentals(request):
+    return load_table(request, STATUS, "fundamentals_pit.parquet")
 
 
 class TestMarketStatusAbsenceIsNotPermission:

@@ -11,8 +11,21 @@ from pathlib import Path
 
 import pytest
 
-DATASET = Path(r"C:\tmp\tw-alpha-m6-dataset-08")
-WAREHOUSE_PRICES = Path(r"C:\tmp\tw-alpha-m3-pit-prices-09\daily_prices_pit.parquet")
+import sys
+
+REPO = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO / "tests"))
+
+# Deliberately the pre-rebuild generation. M6 has not been re-run for the
+# six-year window, so this dataset and the warehouse it was derived from are
+# a matched pair; swapping in the new prices table would compare 382 sessions
+# against 1,840 and read the difference as a defect.
+from warehouse import (  # noqa: E402
+    RESEARCH_DATASET as DATASET,
+    RESEARCH_DATASET_PRICES,
+)
+
+WAREHOUSE_PRICES = RESEARCH_DATASET_PRICES / "daily_prices_pit.parquet"
 
 
 def table():

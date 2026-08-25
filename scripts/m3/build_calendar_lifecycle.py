@@ -246,7 +246,13 @@ def apply_official_delistings(
     """
 
     official = load_official_delistings()
-    stats = {"agreed": 0, "filled": 0, "skipped_earlier_life": 0, "conflicts": []}
+    stats = {
+        "agreed": 0,
+        "filled": 0,
+        "truncated": 0,
+        "skipped_earlier_life": 0,
+        "conflicts": [],
+    }
 
     # A symbol is not an identity. 2432 was delisted on 2008-09-01, and the
     # code was later reissued to a company still trading; the exchange's list
@@ -283,6 +289,27 @@ def apply_official_delistings(
             row["delisting_basis"] = "official-exchange-list"
             row["delisting_reason"] = record["reason"]
             stats["agreed"] += 1
+        elif ours > theirs:
+            # The vendor's interval runs past the date the exchange closed
+            # this life, so that end is not a delisting. `board_legs` sets a
+            # leg's end to the start of the next leg, which makes a move to
+            # another board look identical to leaving the market.
+            #
+            # 2432 is the case that surfaced it: one vendor record carries
+            # 倚天資訊 on TSE from 2000 and 倚天酷碁 on TIB from 2023, so the
+            # TSE leg appears to end in 2023 when the exchange delisted it in
+            # 2008. That is the vendor's (market, symbol) key merging a reuse
+            # of the code -- documented exception #3 -- not a security that
+            # traded for fifteen more years.
+            #
+            # A delisting is the exchange's act, so the interval is truncated
+            # to the date the exchange gave. Whatever the vendor recorded
+            # afterwards belongs to a life this row does not describe; if that
+            # life is real it needs its own interval and its own evidence.
+            row["delisting_date"] = theirs
+            row["delisting_basis"] = "official-exchange-list"
+            row["delisting_reason"] = record["reason"]
+            stats["truncated"] += 1
         else:
             stats["conflicts"].append(
                 {"market": key[0], "symbol": key[1], "vendor": ours, "official": theirs}
@@ -571,6 +598,14 @@ def build(staging_root: Path, out_root: Path) -> dict[str, Any]:
             "distinct_symbols": len({(r["market"], r["symbol"]) for r in intervals}),
             "delisting_confirmed_by_exchange": delisting_stats["agreed"],
             "delisting_filled_from_exchange": delisting_stats["filled"],
+            # A vendor interval the exchange cut short. Reported because a
+            # correction nobody can see is indistinguishable from data that
+            # never needed correcting, and this one moved a delisting by
+            # fifteen years.
+            "delisting_truncated_to_exchange": delisting_stats["truncated"],
+            "intervals_starting_after_their_exchange_delisting": delisting_stats[
+                "skipped_earlier_life"
+            ],
         },
         "notes": [
             "Lifecycle currently rests on TEJ licensed-vendor evidence, "

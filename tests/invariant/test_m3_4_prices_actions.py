@@ -11,25 +11,29 @@ from pathlib import Path
 
 import pytest
 
-PIT = Path(r"C:\tmp\tw-alpha-m3-pit-prices-09")
+import sys
 
+REPO = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO / "tests"))
 
-def table(name: str):
-    path = PIT / name
-    if not path.is_file():
-        pytest.skip(f"{name} not built on this machine")
-    pq = pytest.importorskip("pyarrow.parquet")
-    return pq.read_table(path)
+from warehouse import CALENDAR, PRICES, WINDOW, load_rows, load_table  # noqa: E402
 
 
 @pytest.fixture(scope="module")
-def prices():
-    return table("daily_prices_pit.parquet")
+def prices(request):
+    return load_table(request, PRICES, "daily_prices_pit.parquet")
 
 
 @pytest.fixture(scope="module")
-def actions():
-    return table("corporate_actions_pit.parquet")
+def actions(request):
+    return load_table(request, PRICES, "corporate_actions_pit.parquet")
+
+
+@pytest.fixture(scope="module")
+def calendar_rows(request):
+    """The calendar these prices must agree with, read rather than assumed."""
+
+    return load_rows(request, CALENDAR, "trading_calendar_pit.csv")
 
 
 class TestPricesAreRawAndUnfilled:
@@ -58,9 +62,16 @@ class TestPricesAreRawAndUnfilled:
         )
 
     def test_no_session_outside_the_fixed_window(self, prices):
+        """The window comes from `tests/warehouse.py`, not from two literals.
+
+        These were `"2025-01-01"` and `"2026-08-03"` written in place. When the
+        window moved to 2019 the assertion did not, and it could not have --
+        nothing connected it to the build it was describing.
+        """
+
         dates = prices["session_date"].to_pylist()
-        assert min(dates) >= "2025-01-01"
-        assert max(dates) <= "2026-08-03"
+        assert min(dates) >= WINDOW[0]
+        assert max(dates) <= WINDOW[1]
 
     def test_every_row_carries_full_lineage(self, prices):
         for column in ("source_id", "snapshot_id", "parse_run_id", "record_id"):
@@ -73,8 +84,28 @@ class TestPricesAreRawAndUnfilled:
             f"price rows must come from quality-gated observations, saw {tiers}"
         )
 
-    def test_session_count_matches_the_calendar(self, prices):
-        assert len(set(prices["session_date"].to_pylist())) == 382
+    def test_session_count_matches_the_calendar(self, prices, calendar_rows):
+        """Now it does what its name says.
+
+        The body was `== 382`. A literal cannot tell whether the price table
+        and the calendar agree; it only notices that something moved, and it
+        moves for a window change exactly as loudly as for a real defect. Both
+        tables are read and compared instead, so the two can no longer drift
+        apart while the number stays right.
+        """
+
+        priced = set(prices["session_date"].to_pylist())
+        open_days = {
+            r["session_date"]
+            for r in calendar_rows
+            if r["session_state"] == "official-open"
+        }
+        assert priced == open_days, (
+            f"{len(priced)} priced sessions against {len(open_days)} the "
+            f"calendar calls open; only in prices: "
+            f"{sorted(priced - open_days)[:5]}; only in the calendar: "
+            f"{sorted(open_days - priced)[:5]}"
+        )
 
 
 class TestAQuoteHasOneIdentity:

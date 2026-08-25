@@ -15,27 +15,23 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parents[2]
-PIT = Path(r"C:\tmp\tw-alpha-m3-pit-04")
-
+sys.path.insert(0, str(REPO / "tests"))
 sys.path.insert(0, str(REPO / "scripts" / "m3"))
 
-
-def rows(name: str) -> list[dict[str, str]]:
-    path = PIT / name
-    if not path.is_file():
-        pytest.skip(f"{name} not built on this machine")
-    with path.open(encoding="utf-8") as handle:
-        return list(csv.DictReader(handle))
+from warehouse import CALENDAR, load_rows  # noqa: E402
 
 
 @pytest.fixture(scope="module")
-def calendar() -> dict[tuple[str, str], dict[str, str]]:
-    return {(r["market"], r["session_date"]): r for r in rows("trading_calendar_pit.csv")}
+def calendar(request) -> dict[tuple[str, str], dict[str, str]]:
+    return {
+        (r["market"], r["session_date"]): r
+        for r in load_rows(request, CALENDAR, "trading_calendar_pit.csv")
+    }
 
 
 @pytest.fixture(scope="module")
-def intervals() -> list[dict[str, str]]:
-    return rows("security_intervals.csv")
+def intervals(request) -> list[dict[str, str]]:
+    return load_rows(request, CALENDAR, "security_intervals.csv")
 
 
 class TestCalendarGoldenDates:
@@ -207,7 +203,7 @@ class TestTheExchangeOwnsItsOwnDelistings:
         )
         assert row.get("delisting_basis") == "official-exchange-list"
 
-    def test_an_out_of_scope_leg_is_closed_by_its_board_interval(self):
+    def test_an_out_of_scope_leg_is_closed_by_its_board_interval(self, request):
         """6423's third transfer has no lifecycle row, and should not.
 
         It left the innovation board for TPEx on 2026-01-22. The innovation
@@ -217,7 +213,7 @@ class TestTheExchangeOwnsItsOwnDelistings:
         attach to, which is the structure being correct rather than a gap.
         """
 
-        boards = rows("security_board_intervals.csv")
+        boards = load_rows(request, CALENDAR, "security_board_intervals.csv")
         legs = {
             r["board"]: (r["effective_from"], r["effective_to"])
             for r in boards
@@ -228,7 +224,7 @@ class TestTheExchangeOwnsItsOwnDelistings:
 
         listed = [
             r
-            for r in rows("security_intervals.csv")
+            for r in load_rows(request, CALENDAR, "security_intervals.csv")
             if r["symbol"] == "6423" and r["market"] == "TWSE"
         ]
         assert not listed, (

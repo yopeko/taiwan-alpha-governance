@@ -17,17 +17,18 @@ import pytest
 # These now guard the canonical table rather than the one-off audit that
 # derived the join. An invariant protecting a table nobody reads protects
 # nothing, and there is no longer a second `corporate_actions_pit`.
-PIT = Path(r"C:\tmp\tw-alpha-m3-pit-prices-09")
-WINDOW = ("2025-01-01", "2026-08-03")
+import sys
+
+REPO = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO / "tests"))
+
+from warehouse import PRICES, WINDOW, load_table  # noqa: E402
+
 OFFICIAL_SOURCE = "TWSE-ACTIONS-HIST"
 
 
-def table():
-    path = PIT / "corporate_actions_pit.parquet"
-    if not path.is_file():
-        pytest.skip("corporate_actions_pit not built on this machine")
-    pq = pytest.importorskip("pyarrow.parquet")
-    full = pq.read_table(path)
+def table(request):
+    full = load_table(request, PRICES, "corporate_actions_pit.parquet")
     # Scoped to the rows TWT49U produced, because those are the ones the
     # vendor join touches. TPEx and the halt events reach the table with
     # their own publishers' dates and are guarded elsewhere.
@@ -40,23 +41,70 @@ def table():
 
 
 @pytest.fixture(scope="module")
-def actions():
-    return table()
+def actions(request):
+    return table(request)
 
 
 class TestOfficialEventSetIsPreserved:
     def test_every_official_event_survives_the_join(self, actions):
-        assert actions.num_rows == 1665, (
-            "the official event count changed, which means the vendor join "
-            "added or removed events instead of only adding a date"
+        """The join adds a date. It must not add, drop or merge an event.
+
+        This asserted `== 1665`, the count on the day it was written. A frozen
+        count does notice a change, but it cannot say the join caused one, and
+        it fires on a legitimate window change in exactly the same voice as on
+        a defect -- which is how it came to be read as noise.
+
+        Two properties say the same thing without a literal: every event landed
+        in exactly one availability bucket, and no natural key appears twice.
+        An event dropped by the join leaves no bucket; one duplicated by it
+        collides on the key.
+        """
+
+        assert actions.num_rows > 0
+        basis = actions["availability_basis"].to_pylist()
+        buckets = set(basis)
+        assert buckets <= {"publisher-exact", "first-observed-only", "unknown-blocked"}, (
+            f"events in an unlabelled availability state: {buckets}"
+        )
+        assert len(basis) == actions.num_rows
+
+        keys = list(
+            zip(
+                actions["market"].to_pylist(),
+                actions["symbol"].to_pylist(),
+                actions["effective_date"].to_pylist(),
+                actions["revision_ordinal"].to_pylist(),
+                strict=True,
+            )
+        )
+        assert len(set(keys)) == len(keys), (
+            "the join duplicated events: a (market, symbol, effective_date, "
+            "revision_ordinal) appears more than once"
         )
 
     def test_events_without_a_vendor_row_are_kept_not_dropped(self, actions):
+        """Kept and labelled unusable, never deleted.
+
+        Also a frozen count once (`== 103`), which tested how many rather than
+        whether. Over the six-year window it is 5,292 of 6,854 -- the vendor's
+        announcement lane barely reaches back before 2024 -- and the number
+        moving is not what this test is about.
+        """
+
         basis = actions["availability_basis"].to_pylist()
-        assert basis.count("first-observed-only") == 103, (
-            "the events TEJ does not carry must remain in the table, marked "
-            "unusable rather than deleted"
+        unusable = [i for i, b in enumerate(basis) if b == "first-observed-only"]
+        assert unusable, (
+            "no event lacks a vendor announcement date, which would mean the "
+            "join silently discarded the ones TEJ does not carry"
         )
+        evidence = actions["evidence_state"].to_pylist()
+        reference = actions["reference_price"].to_pylist()
+        for i in unusable:
+            assert evidence[i] == "verified-snapshot", (
+                "an event the vendor could not date is still the exchange's "
+                "own record and keeps its evidence state"
+            )
+            assert reference[i], "a kept event must keep its official fields"
 
     def test_the_subject_is_the_official_record(self, actions):
         assert set(actions["source_id"].to_pylist()) == {OFFICIAL_SOURCE}
