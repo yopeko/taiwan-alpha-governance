@@ -93,6 +93,7 @@ AlphaMaster 不得直接寫入正式策略、紙上帳本或真實委託；AI �
 - [M3.16 上櫃公司行動 2019–2023 回補](docs/evidence/m3-16-tpex-actions-2019-2023-2026-08-24.md)
 - [M3.17 六年窗口重建，與它叫醒的三件事](docs/evidence/m3-17-six-year-rebuild-2026-08-25.md)
 - [M3 Owner 決定 D14、D15 與券商條款來源登錄](docs/evidence/m3-owner-decisions-d14-d15-2026-08-25.md)
+- [M6.1 六年窗口重跑：兩個規模，零個策略結論](docs/evidence/m6-1-six-year-rerun-2026-08-25.md)
 
 ## 已凍結的 M0 基線
 
