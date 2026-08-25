@@ -36,11 +36,13 @@ PRODUCER_COMMIT = "fb87f62f8c2c68e2b85982cd102a35fd935bc0a4"
 #   08d0bc3a…  184 files.  Commission rebates: one fill now has a charged cost
 #              and a net cost, and the refund is a receivable that counts
 #              towards NAV but never towards buying power.
+#   4e04f0ca…  184 files.  m0-v1.1.0 (D16): the slot count and the total open
+#              risk cap moved together, 2 to 10 and 2.00% to 7.50%.
 #
 # Superseding the value here does not rewrite what an existing archive
 # recorded. Those are historical facts and stay as captured.
 SOURCE_STATE_FINGERPRINT = (
-    "08d0bc3af6e44202039630766b618afdaf2b19c94fd6f72d89fa2dddf92598fe"
+    "4e04f0ca7929b752cb6124d038d0f1120fe4bbf43c285f1f4c02b68251af98ea"
 )
 
 SOURCE_STATE_HISTORY: tuple[tuple[str, str], ...] = (
@@ -63,6 +65,10 @@ SOURCE_STATE_HISTORY: tuple[tuple[str, str], ...] = (
     (
         "08d0bc3af6e44202039630766b618afdaf2b19c94fd6f72d89fa2dddf92598fe",
         "commission rebates: charged and net costs, receivable in NAV only",
+    ),
+    (
+        "4e04f0ca7929b752cb6124d038d0f1120fe4bbf43c285f1f4c02b68251af98ea",
+        "m0-v1.1.0: slots 2 to 10, total open risk 2.00% to 7.50% (D16)",
     ),
 )
 

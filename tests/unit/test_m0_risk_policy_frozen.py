@@ -38,16 +38,31 @@ from m5.ledger import (  # noqa: E402
 
 CONTRACT = REPO / "docs" / "m0-project-contract.md"
 
-# M0 section 8, frozen 2026-08-02 and unchanged by ADR-0002.
+# M0 section 8 as of m0-v1.1.0.
+#
+# The baseline moved once, and how it moved is the point. On 2026-08-25 this
+# test failed on four assertions the moment the constants changed -- which is
+# what it is for. A policy change has to be an approved amendment with its own
+# decision record, never a quiet edit that nothing notices.
+#
+# v1.0.0 -> v1.1.0 (Owner decision D16): max_positions 2 -> 10 and
+# total_open_risk_cap 2.00% -> 7.50%. Everything else unchanged, including by
+# ADR-0002, which explicitly does not amend this section.
 BASELINE = {
     "initial_capital": Decimal("10000"),
-    "max_positions": 2,
+    "max_positions": 10,
     "max_weight_per_name": Decimal("0.45"),
     "min_cash_reserve": Decimal("0.10"),
     "planned_risk": Decimal("0.0075"),
     "hard_risk_cap": Decimal("0.0100"),
-    "total_open_risk_cap": Decimal("0.0200"),
+    "total_open_risk_cap": Decimal("0.0750"),
 }
+
+# M0 section 8.1 halts a canary at an 8% drawdown. A total open risk cap at or
+# above that would permit a set of compliant positions whose stops, all
+# reached, trigger the halt: one rule allowing what another stops. 10% was
+# authorised and 7.50% chosen to keep the gap.
+HARD_STOP_DRAWDOWN = Decimal("0.08")
 
 
 def contract_section_8() -> str:
@@ -80,6 +95,27 @@ class TestTheLedgerStillEnforcesTheBaseline:
         assert POLICY_PLANNED_RISK < POLICY_HARD_RISK_CAP
         assert POLICY_HARD_RISK_CAP <= POLICY_TOTAL_OPEN_RISK_CAP
 
+    def test_the_slot_count_equals_the_risk_budget(self):
+        """Not an independent number, and it must not become one.
+
+        D16 raised both together. Raising only the slot cap would let it
+        permit what the risk cap forbids; raising only the risk cap would
+        leave capacity nothing can use.
+        """
+
+        assert POLICY_MAX_POSITIONS * POLICY_PLANNED_RISK <= POLICY_TOTAL_OPEN_RISK_CAP
+        assert (
+            POLICY_MAX_POSITIONS + 1
+        ) * POLICY_PLANNED_RISK > POLICY_TOTAL_OPEN_RISK_CAP
+
+    def test_the_risk_cap_stays_below_the_hard_stop(self):
+        """M0 8.1, and the reason 7.50% was chosen over the authorised 10%."""
+
+        assert POLICY_TOTAL_OPEN_RISK_CAP < HARD_STOP_DRAWDOWN, (
+            "a fully compliant book could be stopped out by the drawdown rule "
+            "before the risk cap ever refused anything"
+        )
+
 
 @pytest.fixture(scope="module")
 def section() -> str:
@@ -96,12 +132,12 @@ class TestTheContractStillSaysTheSame:
         "phrase",
         [
             "NT$10,000",
-            "| 最大持股數 | 2 |",
+            "| 最大持股數 | **10**（v1.1.0；原為 2）|",
             "45%",
             "10%",
             "0.75% NAV",
             "1.00% NAV",
-            "2.00% NAV",
+            "**7.50% NAV**（v1.1.0；原為 2.00%）",
         ],
     )
     def test_the_table_still_carries_the_baseline(self, section, phrase):

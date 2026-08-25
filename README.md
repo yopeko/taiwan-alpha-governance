@@ -94,13 +94,15 @@ AlphaMaster 不得直接寫入正式策略、紙上帳本或真實委託；AI �
 - [M3.17 六年窗口重建，與它叫醒的三件事](docs/evidence/m3-17-six-year-rebuild-2026-08-25.md)
 - [M3 Owner 決定 D14、D15 與券商條款來源登錄](docs/evidence/m3-owner-decisions-d14-d15-2026-08-25.md)
 - [M6.1 六年窗口重跑：兩個規模，零個策略結論](docs/evidence/m6-1-six-year-rerun-2026-08-25.md)
+- [M3 Owner 決定 D16：M0 §8 風險政策修訂（m0-v1.1.0）](docs/evidence/m3-owner-decision-d16-2026-08-25.md)
+- [候選報告契約](docs/contracts/candidate-report-contract.md)
 
 ## 已凍結的 M0 基線
 
 - 市場：TWSE 與 TPEx 普通股；其他商品必須另立契約。
 - 頻率：收盤後日線研究與低頻決策。
 - 起始資金：NT$10,000，僅作流程驗證資金。
-- 部位：只做多、現股、最多兩檔、單檔上限 45%、保留至少 10% 現金。
+- 部位：只做多、現股、**最多十檔**（`m0-v1.1.0`，原為兩檔）、單檔上限 45%、保留至少 10% 現金、**總開放風險上限 7.50% NAV**（原 2.00%）。名額不是獨立參數，它等於總開放風險除以單筆 0.75%，見 [D16](docs/evidence/m3-owner-decision-d16-2026-08-25.md)。
 - 禁止：融資、槓桿、放空、借券、當沖及未經批准的自動下單。
 - 策略：`research-sandbox`、`challenger`、`formal` 分離；目前沒有獲准的真實資金正式策略。
 - 升級：只能按 `idea -> research -> validated -> shadow -> paper -> canary -> formal` 前進，不得跳級。

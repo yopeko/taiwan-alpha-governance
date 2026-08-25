@@ -83,12 +83,24 @@ LEDGER_VERSION = "tw-alpha-m5-ledger/1.0.0"
 # M0 section 8. The policy is part of the ledger because breaching it must be
 # a refusal, not a report produced after the fact.
 POLICY_INITIAL_CAPITAL = Decimal("10000")
-POLICY_MAX_POSITIONS = 2
+# Ten, and ten because 7.50% divided by 0.75% is ten. The slot count is not
+# an independent choice: it is the total open risk budget expressed as a
+# number of positions, and a cap that permitted more than the risk budget
+# allows would let one gate open what another forbids.
+#
+# Was 2 under m0-v1.0.0, where 2.00% over 0.75% left room for 2.67. Raised by
+# Owner decision D16 (2026-08-25) because at two slots no backtest can measure
+# stock selection: 277,777 slots-full refusals against 77 completed trades.
+POLICY_MAX_POSITIONS = 10
 POLICY_MAX_WEIGHT_PER_NAME = Decimal("0.45")
 POLICY_MIN_CASH_RESERVE = Decimal("0.10")
 POLICY_PLANNED_RISK = Decimal("0.0075")
 POLICY_HARD_RISK_CAP = Decimal("0.0100")
-POLICY_TOTAL_OPEN_RISK_CAP = Decimal("0.0200")
+# 7.50%, deliberately below the 8% hard stop in M0 section 8.1. Ten percent
+# was authorised; 7.50% was chosen because a cap at or above the hard stop
+# would permit a set of fully compliant positions whose stops, if all reached,
+# trigger the stop rule -- one rule allowing what another halts.
+POLICY_TOTAL_OPEN_RISK_CAP = Decimal("0.0750")
 
 # The only warehouse verdict that permits a fill. Every other value M3.6 can
 # return — blocked, restricted, ineligible, unknown — is a refusal.

@@ -21,6 +21,9 @@ from m5.ledger import (
     OrderRequest,
     PositionPlan,
     POLICY_HARD_RISK_CAP,
+    POLICY_MAX_POSITIONS,
+    POLICY_PLANNED_RISK,
+    POLICY_TOTAL_OPEN_RISK_CAP,
     TRADABLE_STATE,
     every_entry_traces_to_a_fill,
     journal_is_balanced,
@@ -487,16 +490,30 @@ class TestPositionSizingRefusesRatherThanRoundsUp:
         assert plan.is_trade
         assert plan.planned_risk <= POLICY_HARD_RISK_CAP
 
-    def test_a_third_position_is_refused(self):
+    def test_the_slot_after_the_last_one_is_refused(self):
+        """Ten under m0-v1.1.0, and ten because 7.50% over 0.75% is ten.
+
+        Was a third position under v1.0.0. The number moved with Owner
+        decision D16; what does not move is that the slot count equals the
+        risk budget divided by the per-position target, so this test asks the
+        constants rather than restating the number.
+        """
+
         plan = plan_position(
             nav=D("10000"),
             price=D("50"),
             stop_price=D("45"),
-            open_positions=2,
+            open_positions=POLICY_MAX_POSITIONS,
             settled_cash=D("10000"),
         )
         assert not plan.is_trade
         assert plan.reason == "max-positions-reached"
+
+    def test_the_slot_count_is_the_risk_budget_expressed_as_a_number(self):
+        """A slot cap that outran the risk cap would permit what it forbids."""
+
+        assert POLICY_MAX_POSITIONS * POLICY_PLANNED_RISK <= POLICY_TOTAL_OPEN_RISK_CAP
+        assert (POLICY_MAX_POSITIONS + 1) * POLICY_PLANNED_RISK > POLICY_TOTAL_OPEN_RISK_CAP
 
     def test_the_cash_reserve_floor_is_respected(self):
         plan = plan_position(
@@ -525,7 +542,7 @@ class TestPositionSizingRefusesRatherThanRoundsUp:
             price=D("50"),
             stop_price=D("45"),
             open_positions=1,
-            open_risk=D("0.0195"),
+            open_risk=POLICY_TOTAL_OPEN_RISK_CAP - D("0.0005"),
             settled_cash=D("10000"),
         )
         assert not plan.is_trade

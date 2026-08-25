@@ -265,11 +265,30 @@ def run(
                 # The gap opened below the stop the signal was sized against.
                 refusals["entry:opened-below-stop"] += 1
                 continue
+            # M0 section 8 caps *total* open risk at 2.00% of NAV, not just
+            # the risk of each position taken alone. `plan_position` enforces
+            # it, but only against the figure it is handed, and this driver
+            # was handing it nothing -- so the cap defaulted to zero prior
+            # risk and never once refused a trade.
+            #
+            # With two slots the omission could not bite: two positions at the
+            # 0.75% target come to 1.5%, inside the cap. It only becomes
+            # visible when the slot count rises, which is exactly the question
+            # that was being asked of this driver.
+            nav_now = ledger.nav(marks)
+            open_risk = sum(
+                (
+                    (held.entry_price - held.stop_price) * Decimal(held.quantity)
+                    for held in positions.values()
+                ),
+                Decimal("0"),
+            ) / nav_now
             plan = plan_position(
-                nav=ledger.nav(marks),
+                nav=nav_now,
                 price=entry,
                 stop_price=signal.stop_price,
                 open_positions=len(positions),
+                open_risk=open_risk,
                 settled_cash=ledger.buying_power,
             )
             if not plan.is_trade:
