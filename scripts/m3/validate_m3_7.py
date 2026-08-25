@@ -26,10 +26,20 @@ from capture_window import protected_fingerprints  # noqa: E402
 
 RAW = Path(r"C:\project\tw-sepa-screener\data\raw_v2")
 LEGACY_DB = Path(r"C:\project\tw-sepa-screener\data\tw_sepa.duckdb")
-STAGING = Path(r"C:\tmp\tw-alpha-m3-staging-10")
-PIT_CAL = Path(r"C:\tmp\tw-alpha-m3-pit-04")
-PIT_PRICE = Path(r"C:\tmp\tw-alpha-m3-pit-prices-09")
-PIT_STATUS = Path(r"C:\tmp\tw-alpha-m3-pit-status-09")
+# Read from current_build, not written here. These four lines used to name the
+# previous generation, so this validator rebuilt tables from a staging layer
+# nobody had asked about and reported them deterministic: 828,736 price rows
+# against the six-year table's 3,316,101, under the word "passed".
+#
+# A validator aimed at the wrong artifact is worse than no validator, because
+# it produces green. The same defect had just been fixed in five test files;
+# this one was missed because it is not a test file.
+from current_build import (  # noqa: E402
+    CALENDAR as PIT_CAL,
+    PRICES as PIT_PRICE,
+    STAGING,
+    STATUS as PIT_STATUS,
+)
 
 
 def file_sha(path: Path) -> str:

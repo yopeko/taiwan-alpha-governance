@@ -360,7 +360,14 @@ class TestCorporateActionsAreVisible:
     def test_a_date_outside_the_built_window_is_unknown_not_empty(self, warehouse):
         """Outside the window there is no evidence, which is not the same as none."""
 
+        from datetime import date, timedelta
+
         start, end = warehouse._action_window
         assert start and end, "the action table records no window"
-        assert not warehouse._has_action_coverage("2024-01-02")
+        # Derived from the window the table reports, not written down. This
+        # was the literal "2024-01-02", chosen when the window began in 2025;
+        # the six-year rebuild moved the window over it and the test began
+        # asserting that a date inside the window was outside it.
+        outside = (date.fromisoformat(start) - timedelta(days=1)).isoformat()
+        assert not warehouse._has_action_coverage(outside)
         assert warehouse._has_action_coverage(end)

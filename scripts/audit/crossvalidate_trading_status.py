@@ -88,15 +88,22 @@ def official_delistings(data: dict[str, Any]) -> dict[tuple[str, str], dict[str,
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--capture-root", type=Path, required=True)
+    # Defaults from current_build. Written as literals they named the
+    # 2025-2026 generation, and a default is what almost every run uses.
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "m3"))
+    from current_build import CALENDAR, PRICES
+
     parser.add_argument(
         "--lifecycle",
         type=Path,
-        default=Path(r"C:\tmp\tw-alpha-m3-pit-04\security_intervals.csv"),
+        default=CALENDAR / "security_intervals.csv",
     )
     parser.add_argument(
         "--prices",
         type=Path,
-        default=Path(r"C:\tmp\tw-alpha-m3-pit-prices-09\daily_prices_pit.parquet"),
+        default=PRICES / "daily_prices_pit.parquet",
     )
     args = parser.parse_args(argv)
 

@@ -587,8 +587,14 @@ class Warehouse:
 
 
 def default_warehouse() -> Warehouse:
-    return Warehouse(
-        Path(r"C:\tmp\tw-alpha-m3-pit-04"),
-        Path(r"C:\tmp\tw-alpha-m3-pit-prices-09"),
-        Path(r"C:\tmp\tw-alpha-m3-pit-status-09"),
-    )
+    """The current build, read from one place rather than pinned here.
+
+    These were three literals naming the 2025-2026 generation. Every caller
+    that took the default -- the as-of reconstruction itself among them --
+    would have gone on answering questions from the previous warehouse after
+    the six-year rebuild, and answered them successfully.
+    """
+
+    from current_build import CALENDAR, PRICES, STATUS
+
+    return Warehouse(CALENDAR, PRICES, STATUS)

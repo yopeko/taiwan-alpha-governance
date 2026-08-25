@@ -58,12 +58,26 @@ API = "https://api.finmindtrade.com/api/v4/data"
 INFO_DATASET = "TaiwanStockInfo"
 PRICE_DATASET = "TaiwanStockPrice"
 
-WAREHOUSE_PRICES = Path(r"C:\tmp\tw-alpha-m3-pit-prices-09\daily_prices_pit.parquet")
-LIFECYCLE = Path(r"C:\tmp\tw-alpha-m3-pit-04\security_intervals.csv")
-DATASET = Path(r"C:\tmp\tw-alpha-m6-dataset-08\research_dataset.parquet")
+import sys
 
-WINDOW_START = "2025-01-02"
-WINDOW_END = "2026-08-03"
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "m3"))
+
+from current_build import (  # noqa: E402
+    CALENDAR,
+    PRICES,
+    RESEARCH_DATASET,
+    WINDOW,
+)
+
+# An audit that asks an independent source whether the warehouse is complete
+# has to be pointed at the warehouse in question. These were three literals
+# naming the 2025-2026 build, so after the six-year rebuild this would have
+# cross-validated the previous generation and found it, correctly, complete.
+WAREHOUSE_PRICES = PRICES / "daily_prices_pit.parquet"
+LIFECYCLE = CALENDAR / "security_intervals.csv"
+DATASET = RESEARCH_DATASET / "research_dataset.parquet"
+
+WINDOW_START, WINDOW_END = WINDOW
 
 # FinMind keeps one TaiwanStockInfo row per market a security has ever
 # belonged to. Reading the latest one gives you today's market, not the market

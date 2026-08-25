@@ -24,6 +24,7 @@ all-pass") applied to the output it was never applied to.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -31,35 +32,25 @@ import pytest
 
 from conftest import TAIWAN_CORE, require_local_environment
 
-SCRATCH = Path(r"C:\tmp")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "m3"))
 
-# The generation these tests describe. Moving the warehouse means changing
-# these four lines and nothing else, and the golden counts that depend on the
-# window live beside it rather than scattered through the files.
-GENERATION = "2026-08-25 six-year rebuild"
-WINDOW = ("2019-01-01", "2026-08-03")
-
-CALENDAR = SCRATCH / "tw-alpha-m3-pit-12"
-PRICES = SCRATCH / "tw-alpha-m3-pit-prices-11"
-STATUS = SCRATCH / "tw-alpha-m3-pit-status-11"
-
-# Not rebuilt for the six-year window. M6 has not been re-run, so this is
-# still the 382-session dataset and its tests describe that generation. Named
-# here rather than left hardcoded so the discrepancy is visible in one place
-# instead of being discovered the next time someone trusts a green suite.
-RESEARCH_DATASET = SCRATCH / "tw-alpha-m6-dataset-08"
-RESEARCH_DATASET_GENERATION = "2026-08-20 382-session build, not yet rebuilt"
-# The warehouse that dataset was built from. It must stay paired with it: the
-# M6 tests cross-check the dataset against the prices it was derived from, and
-# pointing them at the six-year table would compare 382 sessions against 1,840
-# and call the difference a defect.
-RESEARCH_DATASET_PRICES = SCRATCH / "tw-alpha-m3-pit-prices-09"
-
-WAREHOUSE_ROOTS = {
-    "calendar and lifecycle": CALENDAR,
-    "prices and corporate actions": PRICES,
-    "market status and fundamentals": STATUS,
-}
+# The single source lives with the build scripts, because the generation is a
+# property of the build and `validate_m3_7.py` needs it too. That validator
+# carried the identical stale-path defect these helpers were written to fix,
+# and was missed because it is not a test file -- so the constants moved to
+# where both can read them rather than being duplicated here.
+from current_build import (  # noqa: E402,F401
+    CALENDAR,
+    GENERATION,
+    PRICES,
+    RESEARCH_DATASET,
+    RESEARCH_DATASET_GENERATION,
+    RESEARCH_DATASET_PRICES,
+    STAGING,
+    STATUS,
+    WAREHOUSE_ROOTS,
+    WINDOW,
+)
 
 
 def missing_roots() -> list[str]:
