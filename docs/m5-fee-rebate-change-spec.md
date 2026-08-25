@@ -2,8 +2,10 @@
 
 | 欄位 | 值 |
 |---|---|
-| 狀態 | `proposed`，待 Validation Owner 與 Risk Owner 核可 |
+| 狀態 | **`implemented`，2026-08-25** |
 | 提出日 | 2026-08-25 |
+| 實作 | canonical `tw_sepa_screener.market_rules` 與 `tw_sepa_screener.ledger`，鏡像 `m4/`、`m5/` 已同步；[`m5/tests/test_fee_rebate.py`](../m5/tests/test_fee_rebate.py) 18 條 |
+| source-state 指紋 | `e1657be4…` → **`08d0bc3a…`** |
 | 影響 | `m4.rules.BrokerTerms`、`m4.rules.CostBreakdown`、`m4.rules.trade_costs`、`m5.ledger.Ledger`、`m5.ledger.plan_position` |
 | 證據狀態 | `assumption`，且**限時**（見 §6）|
 | 觸發 | [ADR-0002 §背景 2.1](adr/0002-measurement-scale-separate-from-execution-scale.md) |
@@ -111,7 +113,11 @@ amount     Decimal
 
 **測試 #7 因此改寫**：`spendable` 與守衛都必須反映實扣；若實作把任一處換成淨額，同一組輸入必須產生不同（較寬鬆）的股數，該測試即失敗。
 
-## 4. 先寫會失敗的測試
+## 4. 測試（已實作，18 條）
+
+實作過程中 `journal_is_balanced` 抓到一個真的疏漏：它是**獨立重算**恆等式的，而我先把 `rebate_receivable` 加進 `nav()` 卻沒加進它，下一次執行就紅了。這正是它把加總重寫一遍而不呼叫 `nav()` 的理由——**只改一邊會是失敗，不是沉默**。理由已寫進該函式的 docstring。
+
+另外三條測試最初是我自己寫錯：它們忽略了帳本的預設滑價（成交價 50 × 1.002，18 股多 1.8 元），已改為滑價 0 以隔離要測的行為。
 
 | # | 測試 | 修改前應失敗的原因 |
 |---|---|---|

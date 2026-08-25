@@ -33,11 +33,14 @@ PRODUCER_COMMIT = "fb87f62f8c2c68e2b85982cd102a35fd935bc0a4"
 #   9820fd43…  184 files.  M5 upstreamed: ledger.py and its smoke test.
 #   e1657be4…  184 files.  plan_position snaps to a valid lot, after the
 #              M6 driver found the planner and the ledger disagreeing.
+#   08d0bc3a…  184 files.  Commission rebates: one fill now has a charged cost
+#              and a net cost, and the refund is a receivable that counts
+#              towards NAV but never towards buying power.
 #
 # Superseding the value here does not rewrite what an existing archive
 # recorded. Those are historical facts and stay as captured.
 SOURCE_STATE_FINGERPRINT = (
-    "e1657be4b54ffffef159d0a6a4022a4f095319ef840b8407ac8a57ceff197324"
+    "08d0bc3af6e44202039630766b618afdaf2b19c94fd6f72d89fa2dddf92598fe"
 )
 
 SOURCE_STATE_HISTORY: tuple[tuple[str, str], ...] = (
@@ -56,6 +59,10 @@ SOURCE_STATE_HISTORY: tuple[tuple[str, str], ...] = (
     (
         "e1657be4b54ffffef159d0a6a4022a4f095319ef840b8407ac8a57ceff197324",
         "plan_position snaps to a valid lot",
+    ),
+    (
+        "08d0bc3af6e44202039630766b618afdaf2b19c94fd6f72d89fa2dddf92598fe",
+        "commission rebates: charged and net costs, receivable in NAV only",
     ),
 )
 

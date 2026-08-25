@@ -320,6 +320,18 @@ class BrokerTerms:
     evidence_state: str = "assumption"
     source: str = "M0 contract research defaults; broker terms unconfirmed"
 
+    # A discount that is refunded rather than applied. SinoPac's published
+    # schedule reads "the full commission is charged in the month and returned
+    # to the settlement account on the 15th of the next", so one fill has two
+    # costs: the cash that leaves at execution, and what it finally cost.
+    #
+    # Leave these None and every existing caller keeps its current behaviour
+    # exactly; a broker without a rebate needs no changes.
+    rebate_commission_rate: Decimal | None = None
+    rebate_minimum_commission: Decimal | None = None
+    rebate_payment_day: int | None = None
+    rebate_scope: str = "commission-only"
+
     def __post_init__(self) -> None:
         for name in (
             "commission_rate",
@@ -333,6 +345,41 @@ class BrokerTerms:
         if self.commission_discount > 1:
             raise RuleError("commission_discount must not exceed 1")
 
+        rebate_fields = (
+            self.rebate_commission_rate,
+            self.rebate_minimum_commission,
+            self.rebate_payment_day,
+        )
+        if any(f is not None for f in rebate_fields):
+            if any(f is None for f in rebate_fields):
+                raise RuleError(
+                    "a rebate needs its rate, its minimum and its payment day; "
+                    "a partial declaration would silently charge or refund the "
+                    "wrong amount"
+                )
+            if self.rebate_commission_rate < 0 or self.rebate_minimum_commission < 0:
+                raise RuleError("rebate terms must not be negative")
+            if self.rebate_commission_rate > self.commission_rate:
+                raise RuleError(
+                    "the rebated rate exceeds the charged rate, which would "
+                    "refund more than was taken"
+                )
+            if self.rebate_minimum_commission > self.minimum_commission:
+                raise RuleError(
+                    "the rebated minimum exceeds the charged minimum, which "
+                    "would refund more than was taken"
+                )
+            if not 1 <= self.rebate_payment_day <= 28:
+                raise RuleError("rebate_payment_day must be a day every month has")
+        # The tax is statutory. A broker cannot discount it, so a rebate that
+        # claimed to reach it would be describing something that cannot happen.
+        if self.rebate_scope != "commission-only":
+            raise RuleError("only commission-only rebates are modelled")
+
+    @property
+    def has_rebate(self) -> bool:
+        return self.rebate_payment_day is not None
+
 
 @dataclass(frozen=True)
 class CostBreakdown:
@@ -343,6 +390,13 @@ class CostBreakdown:
     net_cash_delta: Decimal
     minimum_commission_applied: bool
     terms_evidence_state: str
+    # What execution takes, and what the fill finally costs. Equal unless the
+    # broker rebates; `commission` above is `commission_charged` under its old
+    # name, kept so existing callers do not silently change meaning.
+    commission_charged: Decimal = Decimal("0")
+    commission_net: Decimal = Decimal("0")
+    commission_rebate: Decimal = Decimal("0")
+    rebate_due_on: date | None = None
     rules_version: str = RULES_VERSION
 
 
@@ -352,17 +406,46 @@ def _truncate_to_dollar(value: Decimal) -> Decimal:
     return value.to_integral_value(rounding=ROUND_DOWN)
 
 
+def rebate_due_on(filled: date, terms: BrokerTerms) -> date | None:
+    """When a fill's commission rebate reaches the settlement account.
+
+    The published wording is "returned on the 15th of the following month,
+    earlier if that is a holiday". Earlier, so the 15th is the latest a rebate
+    can arrive, and modelling it there keeps the receivable outstanding for as
+    long as it could possibly be. The error runs towards holding cash out of
+    reach rather than towards spending it early, which is the same direction
+    D9 chose for full-cash-delivery.
+
+    A banking calendar would sharpen this. The trading calendar is not one and
+    must not be borrowed for it.
+    """
+
+    if not terms.has_rebate:
+        return None
+    year, month = filled.year, filled.month + 1
+    if month > 12:
+        year, month = year + 1, 1
+    return date(year, month, terms.rebate_payment_day)
+
+
 def trade_costs(
     *,
     side: Side,
     price: Decimal,
     quantity: int,
     terms: BrokerTerms = BrokerTerms(),
+    session: date | None = None,
 ) -> CostBreakdown:
     """Full NTD cost of one fill, including the minimum commission.
 
     `net_cash_delta` is negative for a buy (cash leaves) and positive for a
-    sell (cash arrives), both already net of costs.
+    sell (cash arrives), both already net of costs. Where the broker rebates,
+    both use the amount actually charged: the refund has not arrived yet, and
+    treating it as if it had would overstate buying power.
+
+    `session` is only needed to date a rebate. Without it the rebate is still
+    computed, but `rebate_due_on` is None and the caller must supply the date
+    before booking a receivable.
     """
 
     if quantity <= 0:
@@ -371,28 +454,43 @@ def trade_costs(
         raise RuleError("price must be positive")
 
     gross = price * quantity
-    raw_commission = gross * terms.commission_rate * terms.commission_discount
-    commission = _truncate_to_dollar(raw_commission)
-    minimum_applied = False
-    if commission < terms.minimum_commission:
-        commission = terms.minimum_commission
-        minimum_applied = True
+
+    def _commission(rate: Decimal, floor: Decimal) -> tuple[Decimal, bool]:
+        amount = _truncate_to_dollar(gross * rate * terms.commission_discount)
+        if amount < floor:
+            return floor, True
+        return amount, False
+
+    charged, minimum_applied = _commission(
+        terms.commission_rate, terms.minimum_commission
+    )
+    if terms.has_rebate:
+        net_commission, _ = _commission(
+            terms.rebate_commission_rate, terms.rebate_minimum_commission
+        )
+    else:
+        net_commission = charged
 
     tax = (
         _truncate_to_dollar(gross * terms.sell_tax_rate)
         if side is Side.SELL
         else Decimal("0")
     )
-    total_cost = commission + tax
+    # Cash moves on the charged amount. The rebate is a separate, later event.
+    total_cost = charged + tax
     net = -(gross + total_cost) if side is Side.BUY else gross - total_cost
     return CostBreakdown(
         gross=gross,
-        commission=commission,
+        commission=charged,
         tax=tax,
         total_cost=total_cost,
         net_cash_delta=net,
         minimum_commission_applied=minimum_applied,
         terms_evidence_state=terms.evidence_state,
+        commission_charged=charged,
+        commission_net=net_commission,
+        commission_rebate=charged - net_commission,
+        rebate_due_on=rebate_due_on(session, terms) if session else None,
     )
 
 

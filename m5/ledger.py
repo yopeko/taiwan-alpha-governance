@@ -61,6 +61,7 @@ try:  # The canonical rules module, when Taiwan Core is importable.
         RuleError,
         Side,
         classify_lot,
+        rebate_due_on,
         settlement_date,
         trade_costs,
     )
@@ -72,6 +73,7 @@ except ImportError:  # pragma: no cover - the governance mirror's own layout
         RuleError,
         Side,
         classify_lot,
+        rebate_due_on,
         settlement_date,
         trade_costs,
     )
@@ -111,6 +113,21 @@ class CashEntry:
     amount: Decimal
     order_id: str
     fill_id: str
+
+
+@dataclass(frozen=True)
+class RebateReceivable:
+    """Commission the broker has taken and undertaken to give back.
+
+    Booked per fill rather than per month. The payment arrives aggregated, but
+    an aggregate cannot be traced to the trades that earned it, and M0
+    invariant 6.4 requires exactly that.
+    """
+
+    due_on: date
+    order_id: str
+    fill_id: str
+    amount: Decimal
 
 
 @dataclass(frozen=True)
@@ -234,6 +251,7 @@ class Ledger:
         self.slippage_rate = slippage_rate
         self.journal: list[CashEntry] = []
         self.pending: list[PendingItem] = []
+        self.rebates: list[RebateReceivable] = []
         self.positions: dict[str, Position] = {}
         self.realised_pnl = Decimal("0")
         self.settled_through: date | None = None
@@ -279,7 +297,24 @@ class Ledger:
         )
 
     @property
+    def rebate_receivable(self) -> Decimal:
+        """Commission the broker will refund but has not refunded yet.
+
+        The same shape as `unsettled_proceeds`: certain to arrive, not here.
+        It counts towards NAV because the account really is owed it, and it is
+        kept out of `buying_power` because M0 invariant 6.5 forbids spending
+        money that has not settled.
+
+        Omitting it from NAV understates the account by every fee refunded but
+        not yet received -- at the measured trade rate around 1% to 1.5% of a
+        NT$10,000 NAV, permanently, which would inflate every drawdown.
+        """
+
+        return sum((item.amount for item in self.rebates), Decimal("0"))
+
+    @property
     def buying_power(self) -> Decimal:
+        # Deliberately excludes `rebate_receivable`. See M0 invariant 6.5.
         return self.settled_cash - self.committed_cash
 
     # ----------------------------------------------------------- valuation
@@ -305,6 +340,7 @@ class Ledger:
             self.settled_cash
             + self.unsettled_proceeds
             - self.committed_cash
+            + self.rebate_receivable
             + self.market_value(marks)
         )
 
@@ -364,6 +400,31 @@ class Ledger:
                 )
         self.pending = [item for item in self.pending if item.settles_on > session]
         self.settled_through = session
+        return due
+
+    def credit_rebates_through(self, session: date) -> list[RebateReceivable]:
+        """Pay in every commission rebate due on or before `session`.
+
+        The broker pays one aggregated amount into the settlement account, but
+        each rebate is credited against the fill that earned it. M0 invariant
+        6.4 requires every line in the journal to trace to an order and a fill;
+        a single lump sum would satisfy the bank statement and break that.
+        """
+
+        due = [item for item in self.rebates if item.due_on <= session]
+        for item in due:
+            self.journal.append(
+                CashEntry(
+                    session=item.due_on,
+                    kind="commission-rebate",
+                    amount=item.amount,
+                    order_id=item.order_id,
+                    fill_id=item.fill_id,
+                )
+            )
+        # Removed from the receivable the moment they become cash, so the two
+        # can never both count. Invariant 6.6 forbids paying anything twice.
+        self.rebates = [item for item in self.rebates if item.due_on > session]
         return due
 
     # ------------------------------------------------------------ trading
@@ -452,7 +513,9 @@ class Ledger:
             )
 
         settles = settlement_date(request.session, self.sessions)
-        self._post_costs(request, costs.commission, Decimal("0"))
+        self._post_costs(
+            request, costs.commission, Decimal("0"), costs.commission_rebate
+        )
         self.pending.append(
             PendingItem(
                 settles_on=settles,
@@ -505,7 +568,9 @@ class Ledger:
             side=Side.SELL, price=price, quantity=quantity, terms=self.terms
         )
         settles = settlement_date(request.session, self.sessions)
-        self._post_costs(request, costs.commission, costs.tax)
+        self._post_costs(
+            request, costs.commission, costs.tax, costs.commission_rebate
+        )
         self.pending.append(
             PendingItem(
                 settles_on=settles,
@@ -532,15 +597,39 @@ class Ledger:
         )
 
     def _post_costs(
-        self, request: OrderRequest, commission: Decimal, tax: Decimal
+        self,
+        request: OrderRequest,
+        commission: Decimal,
+        tax: Decimal,
+        rebate: Decimal = Decimal("0"),
     ) -> None:
         """Fees leave settled cash immediately and carry their fill's identity.
 
         They are posted separately from the principal so that M0 invariant 6.4
         holds by construction: no line in the journal exists without an order
         and a fill to trace it to.
+
+        `commission` is what the broker actually takes. Where terms include a
+        rebate, the refund is booked as a receivable rather than netted off
+        here: the cash has left, and pretending otherwise would let the account
+        spend money it does not have for up to forty-five days.
         """
 
+        if rebate:
+            due = rebate_due_on(request.session, self.terms)
+            if due is None:
+                raise LedgerError(
+                    "a rebate was calculated but the terms carry no payment "
+                    "day; refusing to book a receivable with no due date"
+                )
+            self.rebates.append(
+                RebateReceivable(
+                    due_on=due,
+                    order_id=request.order_id,
+                    fill_id=request.fill_id,
+                    amount=rebate,
+                )
+            )
         if commission:
             self.journal.append(
                 CashEntry(
@@ -611,6 +700,20 @@ def plan_position(
     if quantity <= 0:
         return PositionPlan(0, "no-quantity-satisfies-every-cap")
 
+    # Opening the position costs the principal *and* the commission the broker
+    # takes at execution -- the charged amount, not the amount a rebate will
+    # eventually reduce it to. Owner decision, 2026-08-25: a refund that lands
+    # on the 15th of next month is not cash today, and an account of this size
+    # cannot spend it in the meantime.
+    #
+    # Refusing rather than shrinking, for the reason this function already
+    # gives: a quantity adjusted to make a cap fit is the failure M0 names.
+    opening = trade_costs(
+        side=Side.BUY, price=price, quantity=quantity, terms=terms or BrokerTerms()
+    )
+    if price * quantity + opening.commission_charged > spendable:
+        return PositionPlan(0, "cash-cannot-cover-position-and-charged-commission")
+
     planned_risk = (risk_per_share * Decimal(quantity)) / nav
     if planned_risk > POLICY_HARD_RISK_CAP:
         return PositionPlan(0, "breaches-hard-risk-cap")
@@ -635,12 +738,19 @@ def plan_position(
 
 
 def journal_is_balanced(ledger: Ledger, marks: Mapping[str, Decimal]) -> bool:
-    """M0 invariant 6.1, checked rather than assumed."""
+    """M0 invariant 6.1, checked rather than assumed.
+
+    The sum is written out again rather than calling `nav`, so that adding a
+    component to one and not the other is a failure instead of a silence. That
+    is not hypothetical: `rebate_receivable` was added to `nav` first and this
+    check caught the omission on the next run.
+    """
 
     components = (
         ledger.settled_cash
         + ledger.unsettled_proceeds
         - ledger.committed_cash
+        + ledger.rebate_receivable
         + ledger.market_value(marks)
     )
     return components == ledger.nav(marks)
