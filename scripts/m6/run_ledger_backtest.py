@@ -68,7 +68,7 @@ from m5.ledger import (  # noqa: E402
 
 SCHEMA_ID = "tw-alpha-m6-ledger-backtest/1.0.0"
 CANDIDATE_REPORT_SCHEMA = "tw-alpha-m6-candidate-report/1.0.0"
-CANDIDATE_REPORT_CONTRACT = "candidate-report-v1.0.0"
+CANDIDATE_REPORT_CONTRACT = "candidate-report-v1.2.0"
 
 # The median stop distance measured across the SEPA trades in M6 Phase 0.
 # Used only to turn the risk budget into a position size when deriving the
@@ -100,24 +100,69 @@ def lot_legs(quantity: int) -> list[int]:
     return [leg for leg in (board, odd) if leg > 0]
 
 
-# Refusals that mean the account could not take another position, as opposed
-# to this security not being tradable. Rank consistency is checked against
-# these only: a name refused because it was halted says nothing about whether
-# the ranking was followed.
+# Refusals that mean the account could not take the position, as opposed to
+# this security not being tradable. Rank consistency is checked against these
+# only: a name refused because it was halted says nothing about whether the
+# ranking was followed.
 #
-# `round-trip-cost-exceeds-planned-risk` is a judgement call and is counted as
-# capacity, because it moves with the size of the account rather than with the
-# security. The contract records the same call, and a test compares the two.
-CAPACITY_REFUSALS = frozenset(
+# Split in two on 2026-08-26, because the two halves answer different
+# questions and were cancelling each other out while pooled.
+#
+# Scarcity: the account is full, and `plan_position` reaches these branches
+# before it reads the candidate's price at all. They fire identically for
+# every security.
+SCARCITY_REFUSALS = frozenset(
     {
         "entry:position-slots-full",
+        "entry:max-positions-reached",
         "entry:cash-reserve-floor-reached",
+    }
+)
+
+# Sizing: the account could not take *this* security at a size that satisfies
+# every cap. Each of these branches reads the candidate's own price or stop,
+# so a wide-stopped or expensive name fails where a cheaper one fits.
+#
+# `round-trip-cost-exceeds-planned-risk` was called capacity on 2026-08-25 for
+# the reason that it moves with account size. True, and it also moves with the
+# security, which is what puts it here.
+SIZING_REFUSALS = frozenset(
+    {
         "entry:cash-cannot-cover-position-and-charged-commission",
+        "entry:breaches-hard-risk-cap",
         "entry:breaches-total-open-risk-cap",
         "entry:no-quantity-satisfies-every-cap",
         "entry:round-trip-cost-exceeds-planned-risk",
     }
 )
+
+CAPACITY_REFUSALS = SCARCITY_REFUSALS | SIZING_REFUSALS
+
+
+def count_rank_violation(
+    opened: list[float], refused: list[tuple[float, str]], codes: frozenset[str]
+) -> str | None:
+    """Did a refusal in `codes` outscore something opened the same session?
+
+    Returns the offending code, or None. Compared at the extremes -- the best
+    name turned away against the worst one taken -- because that is the pair
+    that breaks first.
+
+    Pulled out of the session loop so both answers can be exercised by a unit
+    test. In the driver the scarcity branch cannot return a code: signals are
+    walked in descending score order and `positions` only grows during the
+    loop, so once the slots fill nothing opens after, and a scarcity refusal
+    is never followed by a fill. Zero there is a guard on the sort, not a
+    finding about the strategy.
+    """
+
+    if not opened or not refused:
+        return None
+    candidates = [(score, code) for score, code in refused if code in codes]
+    if not candidates:
+        return None
+    best_score, best_code = max(candidates)
+    return best_code if best_score > min(opened) else None
 
 # 12-1 momentum: the return over the past twelve months excluding the most
 # recent one. Jegadeesh & Titman (1993) and the momentum literature that
@@ -259,7 +304,8 @@ def run(
         history_depth = max(history_depth, MOMENTUM_LOOKBACK_SESSIONS + 2)
     # Sessions where a candidate refused for capacity outscored one that was
     # opened. Zero is the claim that fills followed the ranking.
-    rank_violations = 0
+    scarcity_violations = 0
+    sizing_violations = 0
     violation_codes: dict[str, int] = defaultdict(int)
     equity: list[dict[str, Any]] = []
     order_seq = 0
@@ -445,19 +491,21 @@ def run(
             else:
                 note_refusal(f"entry:{result.reason}", signal)
 
-        # A capacity refusal that outscored something we opened means the
-        # ranking was not what decided the book that session. Compared at the
-        # extremes because that is where the rule breaks first: the best name
-        # turned away against the worst one taken.
-        if opened_scores and capacity_refused_scores:
-            best_refused, by_code = max(capacity_refused_scores)
-            if best_refused > min(opened_scores):
-                rank_violations += 1
-                # A bare count says the rule broke without saying where, and
-                # the codes do not all mean the same thing: slots-full is
-                # scarcity, while a cost or quantity cap is the top name not
-                # fitting. Tallied so the two can be told apart.
-                violation_codes[by_code] += 1
+        # Two questions, counted apart. Scarcity: was a name turned away for
+        # want of room while a worse one was taken? Sizing: was the top name
+        # unable to fit? Only the first is the selection logic failing.
+        scarce = count_rank_violation(
+            opened_scores, capacity_refused_scores, SCARCITY_REFUSALS
+        )
+        if scarce is not None:
+            scarcity_violations += 1
+            violation_codes[scarce] += 1
+        sized = count_rank_violation(
+            opened_scores, capacity_refused_scores, SIZING_REFUSALS
+        )
+        if sized is not None:
+            sizing_violations += 1
+            violation_codes[sized] += 1
 
         # --- today's signals fill tomorrow --------------------------------
         for key, row in rows.items():
@@ -498,7 +546,8 @@ def run(
             # 2026-08-26, marks such a run `selection-logic-not-measured`.
             "ranking_function": ranking_name,
         },
-        "rank_consistency_violations": rank_violations if ranking_name else -1,
+        "rank_violations_scarcity": scarcity_violations if ranking_name else -1,
+        "rank_violations_sizing": sizing_violations if ranking_name else -1,
         "rank_violation_codes": dict(
             sorted(violation_codes.items(), key=lambda kv: -kv[1])
         ),
@@ -592,7 +641,8 @@ def candidate_report(results: dict[str, dict[str, Any]]) -> tuple[list[dict], di
         ranking = str(result["strategy"].get("ranking_function") or "")
         # Not applicable without a ranking, and -1 says so rather than 0,
         # which would read as "checked, none found".
-        violations = int(result.get("rank_consistency_violations", -1)) if ranking else -1
+        scarcity = int(result.get("rank_violations_scarcity", -1)) if ranking else -1
+        sizing = int(result.get("rank_violations_sizing", -1)) if ranking else -1
         rows.append(
             {
                 "scale": scale,
@@ -617,14 +667,18 @@ def candidate_report(results: dict[str, dict[str, Any]]) -> tuple[list[dict], di
                 # total fixed that and still failed every broad-signal
                 # candidate on arithmetic that says nothing about its ranking.
                 "ranking_function": ranking,
-                "rank_consistency_violations": violations,
+                # Contract v1.2.0 splits what v1.1.0 pooled. Sizing violations
+                # were outvoting the scarcity ones and taking the verdict with
+                # them, while saying nothing about the selection logic.
+                "rank_violations_scarcity": scarcity,
+                "rank_violations_sizing": sizing,
                 # Which code outscored an opened position, so a non-zero
                 # count can be read rather than only counted.
                 "rank_violation_codes_json": json.dumps(
                     result.get("rank_violation_codes", {}) if ranking else {},
                     ensure_ascii=False,
                 ),
-                "selection_logic_measured": bool(ranking) and violations == 0,
+                "selection_logic_measured": bool(ranking) and scarcity == 0,
                 "refusals_json": json.dumps(
                     dict(sorted(refusals.items())), ensure_ascii=False
                 ),
@@ -738,6 +792,17 @@ def main(argv: list[str] | None = None) -> int:
                 f"  成本/期初 {row['cost_share_of_capital']:>6.1%}"
                 f"  成本/成交額 {row['cost_share_of_turnover']:>6.2%}"
             )
+            if row["rank_violations_sizing"] > 0:
+                codes = json.loads(row["rank_violation_codes_json"])
+                detail = ", ".join(
+                    f"{k} x{v}" for k, v in codes.items() if k in SIZING_REFUSALS
+                )
+                # Reported, never a verdict: this is the account refusing the
+                # top-ranked name, not the ranking being ignored.
+                print(
+                    f"  {row['scale']}: {row['rank_violations_sizing']} sessions "
+                    f"where the top-ranked name would not fit ({detail})"
+                )
             if not row["selection_logic_measured"]:
                 # Say which of the two failures it is. The count of refusals
                 # stopped deciding this in contract v1.1.0 and printing it
@@ -745,11 +810,9 @@ def main(argv: list[str] | None = None) -> int:
                 if not row["ranking_function"]:
                     why = "no ranking function declared, so fills followed arrival order"
                 else:
-                    codes = json.loads(row["rank_violation_codes_json"])
-                    detail = ", ".join(f"{k} x{v}" for k, v in codes.items())
                     why = (
-                        f"{row['rank_consistency_violations']} rank-inconsistent "
-                        f"sessions ({detail})"
+                        f"{row['rank_violations_scarcity']} sessions took a "
+                        "worse-scored name while a better one waited for room"
                     )
                 print(
                     f"  {row['scale']}: selection-logic-not-measured -- {why}. "

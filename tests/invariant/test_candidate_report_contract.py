@@ -17,6 +17,7 @@ which is not the question being asked.
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -39,24 +40,32 @@ REQUIRED_COLUMNS = {
     "cost_share_of_turnover",
     "refusals_total",
     "ranking_function",
-    "rank_consistency_violations",
+    "rank_violations_scarcity",
+    "rank_violations_sizing",
     "rank_violation_codes_json",
     "selection_logic_measured",
     "refusals_json",
 }
 
-# Contract v1.1.0 section 3. Refusals that mean the account could not take
-# another position, as opposed to this security not being tradable. The list
-# lives in the contract; it is repeated here so a silent edit to one shows up
-# as a disagreement rather than as agreement by construction.
-CAPACITY_REFUSALS = {
+# Contract v1.2.0 section 3. Two lists, because they answer different
+# questions: scarcity decides the verdict, sizing is reported only. Repeated
+# here so a silent edit to one shows up as a disagreement rather than as
+# agreement by construction.
+SCARCITY_REFUSALS = {
     "entry:position-slots-full",
+    "entry:max-positions-reached",
     "entry:cash-reserve-floor-reached",
+}
+
+SIZING_REFUSALS = {
     "entry:cash-cannot-cover-position-and-charged-commission",
+    "entry:breaches-hard-risk-cap",
     "entry:breaches-total-open-risk-cap",
     "entry:no-quantity-satisfies-every-cap",
     "entry:round-trip-cost-exceeds-planned-risk",
 }
+
+CAPACITY_REFUSALS = SCARCITY_REFUSALS | SIZING_REFUSALS
 
 REQUIRED_SCALES = {"m0-execution", "reference-measurement"}
 
@@ -156,8 +165,27 @@ class TestSelectionLogicIsJudgedOnRankNotOnCounts:
     def test_the_verdict_requires_rank_consistent_fills(self, report):
         for row in report:
             if row["ranking_function"]:
-                expected = row["rank_consistency_violations"] == 0
+                expected = row["rank_violations_scarcity"] == 0
                 assert row["selection_logic_measured"] is expected
+
+    def test_the_sizing_count_does_not_touch_the_verdict(self, report):
+        """Contract v1.2.0 section 3.
+
+        Pooled with scarcity until 2026-08-26, where it outvoted it and took
+        the verdict along: 53 and 123 violations for the 12-1 momentum
+        candidate, of which scarcity was 0 and sizing was all of them. The
+        account failing to fit the top-ranked name is a property of its size,
+        which is ADR-0002's subject, not a defect in the selection logic.
+        """
+
+        for row in report:
+            if row["ranking_function"] and row["rank_violations_sizing"] > 0:
+                assert row["selection_logic_measured"] is (
+                    row["rank_violations_scarcity"] == 0
+                ), (
+                    f"{row['scale']}: the verdict moved with the sizing count, "
+                    "which section 3 excludes from it"
+                )
 
     def test_a_violation_count_says_which_code_caused_it(self, report):
         """A bare count cannot be acted on.
@@ -173,9 +201,10 @@ class TestSelectionLogicIsJudgedOnRankNotOnCounts:
             if not row["ranking_function"]:
                 assert codes == {}, "no ranking, so nothing can have violated it"
                 continue
-            assert sum(codes.values()) == row["rank_consistency_violations"], (
+            expected = row["rank_violations_scarcity"] + row["rank_violations_sizing"]
+            assert sum(codes.values()) == expected, (
                 f"{row['scale']}: the itemised violations do not sum to the "
-                "reported count, so one of the two is not being maintained"
+                "two reported counts, so one of them is not being maintained"
             )
             unknown = set(codes) - CAPACITY_REFUSALS
             assert not unknown, (
@@ -188,7 +217,8 @@ class TestSelectionLogicIsJudgedOnRankNotOnCounts:
 
         for row in report:
             if not row["ranking_function"]:
-                assert row["rank_consistency_violations"] == -1
+                assert row["rank_violations_scarcity"] == -1
+                assert row["rank_violations_sizing"] == -1
 
     def test_the_amended_path_is_actually_exercised(self, report):
         """Some row has to declare a ranking, or nothing here is being tested.
@@ -282,6 +312,30 @@ class TestTheCapacityListMatchesTheContract:
         assert not missing, (
             f"the contract no longer lists {sorted(missing)}; the two copies "
             "have to move together or the check silently narrows"
+        )
+
+    def test_the_producer_declares_the_version_the_contract_carries(self):
+        """The manifest's `contract_version` is the report's own claim.
+
+        Found stale on 2026-08-26: the producer still said v1.0.0 while the
+        document had moved to v1.1.0 and the report already carried v1.1.0
+        fields. Nothing was watching the pair, so a reader checking whether a
+        report met a given version would have been told the wrong one.
+        """
+
+        contract = (
+            REPO / "docs" / "contracts" / "candidate-report-contract.md"
+        ).read_text(encoding="utf-8")
+        declared = (REPO / "scripts" / "m6" / "run_ledger_backtest.py").read_text(
+            encoding="utf-8"
+        )
+        version = re.search(
+            r'CANDIDATE_REPORT_CONTRACT = "(candidate-report-v[\d.]+)"', declared
+        )
+        assert version, "the producer no longer declares a contract version"
+        assert version.group(1) in contract, (
+            f"the producer declares {version.group(1)}, which the contract "
+            "document does not mention"
         )
 
     def test_a_security_specific_refusal_is_not_treated_as_capacity(self):

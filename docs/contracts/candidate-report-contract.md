@@ -2,7 +2,7 @@
 
 | 欄位 | 值 |
 |---|---|
-| 契約版本 | `candidate-report-v1.1.0`（2026-08-26；§3 判定由拒絕數改為排序一致性，見 [ADR-0002 決策 4 的修訂](../adr/0002-measurement-scale-separate-from-execution-scale.md)。其餘不變）|
+| 契約版本 | `candidate-report-v1.2.0`（2026-08-26；§3 判定拆為稀缺與塞不下兩項，只有前者決定判定。v1.1.0 同日把判定由拒絕數改為排序一致性，見 [ADR-0002 決策 4 的修訂](../adr/0002-measurement-scale-separate-from-execution-scale.md)）|
 | 狀態 | `baseline-approved`，2026-08-25 |
 | 用途 | 強制 ADR-0002 決策 3 與 4；作為 M7 巢狀驗證的輸入格式 |
 | 核准 | Product Owner（單一簽核人，Owner 決定 2026-08-25）|
@@ -51,11 +51,12 @@ ADR-0002 的決策 3 與 4 目前只是文字：報告要並列兩個規模、�
 | `refusals` | **每一個**理由碼與次數，不得只列前 N 名 |
 | `refusals_total` | 所有拒絕的總數 |
 | `ranking_function` | 候選據以排序的分數名稱；沒有排序則為空字串 |
-| `rank_consistency_violations` | 成交與排序不一致的場次數；無排序函式時為 −1（不適用）|
+| `rank_violations_scarcity` | 因**沒有空位**而擋下高分、卻收下低分的場次數；無排序函式時為 −1（不適用）|
+| `rank_violations_sizing` | 最高分那檔**塞不進去**的場次數；無排序函式時為 −1（不適用）|
 | `rank_violation_codes` | 造成違反的理由碼與次數；無排序函式時為空 |
 | `selection_logic_measured` | 布林；判定規則見 §3 |
 
-`rank_violation_codes` 是 2026-08-26 補的。只有一個計數說得出規則破了，說不出破在哪，而那些理由碼講的不是同一件事：`position-slots-full` 是稀缺，成本或數量上限則是最高分的那檔塞不進去。兩者要分得開，這個數字才能讀。
+v1.1.0 的 `rank_consistency_violations` 由上面兩欄取代（v1.2.0，2026-08-26）。它把兩件講不同話的事加在一起，而加總之後大的那一項會把判定整個帶走：12-1 動能候選的 53／123 次違反，稀缺佔 0、塞不下佔全部。
 
 ### 2.3 譜系
 
@@ -70,14 +71,26 @@ ADR-0002 的決策 3 與 4 目前只是文字：報告要並列兩個規模、�
 
 ## 3. 選股邏輯判定：看排序一致性，不看拒絕數
 
-**v1.1.0，2026-08-26**（依 [ADR-0002 決策 4 的修訂](../adr/0002-measurement-scale-separate-from-execution-scale.md)）。
+**v1.2.0，2026-08-26**（依 [ADR-0002 決策 4 的修訂](../adr/0002-measurement-scale-separate-from-execution-scale.md)）。
 
 `selection_logic_measured` 為真，須同時滿足：
 
 1. `ranking_function` 非空——候選宣告了它據以排序的分數；且
-2. `rank_consistency_violations == 0`——同一場次中，沒有任何因**容量**被拒的候選，其分數高於當場開倉的任一部位。
+2. `rank_violations_scarcity == 0`——同一場次中，沒有任何因**沒有空位**被拒的候選，其分數高於當場開倉的任一部位。
 
 未宣告排序函式者一律為偽，**不論拒絕數多寡**。
+
+`rank_violations_sizing` **不參與判定**，但仍為必填。它講的是帳戶塞不下最高分的那一檔，那是規模的性質，不是選股邏輯的缺陷。
+
+### 這條判定實際上在保證什麼
+
+要說清楚，免得被讀得比它實際上更強。
+
+訊號依分數由高到低走訪，而 `positions` 在進場迴圈中只增不減（出場在更早一步就跑完了）。所以名額一旦滿了就不會再放開，之後不會再有任何一筆成交——**因此稀缺型拒絕在結構上不可能後面跟著一筆開倉**。
+
+也就是說，排序正確時 `rank_violations_scarcity` 必然為 0。它是**排序有沒有真的被套用**的守門員，不是「策略在稀缺下表現良好」的證據。它會變成非零的情況只有一種：排序壞了，或根本沒有排序而改用到達順序。
+
+那正是這個欄位該保證的事，也正是 `selection_logic_measured` 這個名字說的事——這次跑的是一條選股規則，不是先到先得。它沒有說那條規則好。
 
 ### 為什麼不再用拒絕數
 
@@ -87,22 +100,31 @@ v1.0.0 的規則是 `refusals_total > completed_trades × 10`。它換過一次�
 
 那條規則同時混著兩件事：**容量受限**（對任何篩選型策略都成立，不是缺陷）與**選擇無序**（名額滿時先到先得，才是缺陷）。排序一致性只測後者。
 
-### 「容量」拒絕的列舉
+### 兩類「容量」拒絕的列舉
 
-以下理由碼視為容量拒絕，納入一致性檢查：
+分界不是取捨，是可查的：`plan_position` 讀不讀候選自己的價格。
+
+**稀缺**——在讀到價格之前就返回，對每一檔證券一視同仁。計入判定：
 
 ```
 entry:position-slots-full
+entry:max-positions-reached
 entry:cash-reserve-floor-reached
+```
+
+**塞不下**——每一條都讀了該檔的價格或停損，所以停損寬的、價格貴的會失敗，便宜的通過。呈報，不計入判定：
+
+```
 entry:cash-cannot-cover-position-and-charged-commission
+entry:breaches-hard-risk-cap
 entry:breaches-total-open-risk-cap
 entry:no-quantity-satisfies-every-cap
 entry:round-trip-cost-exceeds-planned-risk
 ```
 
-其餘（`not-tradable-restricted`、`no-opening-price`、`opened-below-stop` 等）與帳戶塞不塞得下無關，是該證券自己的狀態，不納入。
+`round-trip-cost-exceeds-planned-risk` 在 2026-08-25 被歸為容量，理由是「它隨帳戶規模變動」。那句沒錯，但它同時也隨證券變動，而後者決定它落在「塞不下」這一邊。
 
-最後一項是判斷：成本超過該部位被定量的風險，兼具兩者的性質，歸為容量，因為它隨帳戶規模變動而非隨證券變動。
+其餘（`not-tradable-restricted`、`no-opening-price`、`opened-below-stop` 等）與帳戶塞不塞得下無關，是該證券自己的狀態，兩類都不納入。
 
 `entry:already-held` **不是容量拒絕**。已經持有那檔，代表排序被遵守了而不是被推翻。它在 2026-08-26 之前被併進 `position-slots-full`，而那個併法會拿帳戶自己最好的部位去製造違反：同一檔再次發出訊號、分數很高、因已持有被拒，於是看起來像是高分被擋、低分成交。改碼後 12-1 動能的違反數由 70／375 降到 53／123。
 
