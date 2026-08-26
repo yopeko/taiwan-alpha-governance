@@ -260,6 +260,7 @@ def run(
     # Sessions where a candidate refused for capacity outscored one that was
     # opened. Zero is the claim that fills followed the ranking.
     rank_violations = 0
+    violation_codes: dict[str, int] = defaultdict(int)
     equity: list[dict[str, Any]] = []
     order_seq = 0
 
@@ -356,16 +357,23 @@ def run(
 
         # --- entries, from yesterday's signals ----------------------------
         opened_scores: list[float] = []
-        capacity_refused_scores: list[float] = []
+        capacity_refused_scores: list[tuple[float, str]] = []
 
         def note_refusal(code: str, signal: Signal) -> None:
             refusals[code] += 1
             if signal.score is not None and code in CAPACITY_REFUSALS:
-                capacity_refused_scores.append(signal.score)
+                capacity_refused_scores.append((signal.score, code))
 
         for signal in pending:
             key = (signal.market, signal.symbol)
-            if key in positions or len(positions) >= POLICY_MAX_POSITIONS:
+            if key in positions:
+                # Not scarcity: we already hold it, and holding the better
+                # name is the ranking being obeyed, not overruled. Filed
+                # under slots-full until 2026-08-26, where it manufactured
+                # rank violations out of the account's own best position.
+                note_refusal("entry:already-held", signal)
+                continue
+            if len(positions) >= POLICY_MAX_POSITIONS:
                 note_refusal("entry:position-slots-full", signal)
                 continue
             row = rows.get(key)
@@ -442,8 +450,14 @@ def run(
         # extremes because that is where the rule breaks first: the best name
         # turned away against the worst one taken.
         if opened_scores and capacity_refused_scores:
-            if max(capacity_refused_scores) > min(opened_scores):
+            best_refused, by_code = max(capacity_refused_scores)
+            if best_refused > min(opened_scores):
                 rank_violations += 1
+                # A bare count says the rule broke without saying where, and
+                # the codes do not all mean the same thing: slots-full is
+                # scarcity, while a cost or quantity cap is the top name not
+                # fitting. Tallied so the two can be told apart.
+                violation_codes[by_code] += 1
 
         # --- today's signals fill tomorrow --------------------------------
         for key, row in rows.items():
@@ -485,6 +499,9 @@ def run(
             "ranking_function": ranking_name,
         },
         "rank_consistency_violations": rank_violations if ranking_name else -1,
+        "rank_violation_codes": dict(
+            sorted(violation_codes.items(), key=lambda kv: -kv[1])
+        ),
         "assumptions": {
             "participation_rate": float(PARTICIPATION_RATE),
             "signal_on_close_fill_next_open": True,
@@ -601,6 +618,12 @@ def candidate_report(results: dict[str, dict[str, Any]]) -> tuple[list[dict], di
                 # candidate on arithmetic that says nothing about its ranking.
                 "ranking_function": ranking,
                 "rank_consistency_violations": violations,
+                # Which code outscored an opened position, so a non-zero
+                # count can be read rather than only counted.
+                "rank_violation_codes_json": json.dumps(
+                    result.get("rank_violation_codes", {}) if ranking else {},
+                    ensure_ascii=False,
+                ),
                 "selection_logic_measured": bool(ranking) and violations == 0,
                 "refusals_json": json.dumps(
                     dict(sorted(refusals.items())), ensure_ascii=False
@@ -716,11 +739,21 @@ def main(argv: list[str] | None = None) -> int:
                 f"  成本/成交額 {row['cost_share_of_turnover']:>6.2%}"
             )
             if not row["selection_logic_measured"]:
+                # Say which of the two failures it is. The count of refusals
+                # stopped deciding this in contract v1.1.0 and printing it
+                # here kept implying otherwise.
+                if not row["ranking_function"]:
+                    why = "no ranking function declared, so fills followed arrival order"
+                else:
+                    codes = json.loads(row["rank_violation_codes_json"])
+                    detail = ", ".join(f"{k} x{v}" for k, v in codes.items())
+                    why = (
+                        f"{row['rank_consistency_violations']} rank-inconsistent "
+                        f"sessions ({detail})"
+                    )
                 print(
-                    f"  {row['scale']}: selection-logic-not-measured "
-                    f"({row['refusals_total']:,} refusals against "
-                    f"{row['completed_trades']} trades). This row may not rank "
-                    "candidates against one another."
+                    f"  {row['scale']}: selection-logic-not-measured -- {why}. "
+                    "This row may not rank candidates against one another."
                 )
         print(f"\n候選報告寫入 {root}")
         return 0

@@ -40,6 +40,7 @@ REQUIRED_COLUMNS = {
     "refusals_total",
     "ranking_function",
     "rank_consistency_violations",
+    "rank_violation_codes_json",
     "selection_logic_measured",
     "refusals_json",
 }
@@ -158,6 +159,30 @@ class TestSelectionLogicIsJudgedOnRankNotOnCounts:
                 expected = row["rank_consistency_violations"] == 0
                 assert row["selection_logic_measured"] is expected
 
+    def test_a_violation_count_says_which_code_caused_it(self, report):
+        """A bare count cannot be acted on.
+
+        The codes do not mean the same thing: `position-slots-full` is the
+        ranking being ignored under scarcity, while a cost or quantity cap is
+        the top-ranked name failing to fit. Only the first is the defect
+        decision 4 is looking for.
+        """
+
+        for row in report:
+            codes = json.loads(row["rank_violation_codes_json"])
+            if not row["ranking_function"]:
+                assert codes == {}, "no ranking, so nothing can have violated it"
+                continue
+            assert sum(codes.values()) == row["rank_consistency_violations"], (
+                f"{row['scale']}: the itemised violations do not sum to the "
+                "reported count, so one of the two is not being maintained"
+            )
+            unknown = set(codes) - CAPACITY_REFUSALS
+            assert not unknown, (
+                f"{row['scale']}: {sorted(unknown)} caused a rank violation "
+                "without being a capacity refusal, which the check cannot do"
+            )
+
     def test_violations_are_marked_not_applicable_without_a_ranking(self, report):
         """-1, never 0. Zero would read as "checked, and none found"."""
 
@@ -165,21 +190,24 @@ class TestSelectionLogicIsJudgedOnRankNotOnCounts:
             if not row["ranking_function"]:
                 assert row["rank_consistency_violations"] == -1
 
-    def test_the_verdict_does_not_follow_the_old_count_rule(self, report):
-        """The amendment has to have actually changed something.
+    def test_the_amended_path_is_actually_exercised(self, report):
+        """Some row has to declare a ranking, or nothing here is being tested.
 
-        If every row still happened to agree with `total <= trades * 10`, the
-        new rule would be indistinguishable from the one it replaced and this
-        file would be asserting nothing new.
+        The amendment moved the verdict from counting refusals to checking
+        rank consistency, and the rank-consistency branch only runs when a
+        ranking is declared. A canonical report with no ranking satisfies
+        every rule in this class by taking the short way out of each one.
+
+        This was written on 2026-08-26 to replace a test that compared the new
+        verdict against the old `total <= trades * 10` rule. That comparison
+        passed whenever both rules said False, which for a broad-signal
+        candidate is always, so it asserted nothing.
         """
 
-        old_rule = [
-            row["refusals_total"] <= row["completed_trades"] * 10 for row in report
-        ]
-        new_rule = [row["selection_logic_measured"] for row in report]
-        assert any(row["ranking_function"] == "" for row in report) or old_rule == new_rule, (
-            "no row exercises the amended path; add a ranked candidate or a "
-            "fixture that does, or this test cannot tell the rules apart"
+        assert any(row["ranking_function"] for row in report), (
+            "no row in the canonical report declares a ranking function, so "
+            "decision 4's amended path is unexercised. Build the report from a "
+            "ranked candidate: `run_ledger_backtest.py --ranking ...`"
         )
 
     def test_the_refusal_table_is_complete_not_a_top_n(self, report):
@@ -265,3 +293,15 @@ class TestTheCapacityListMatchesTheContract:
             "entry:opened-below-stop",
         ):
             assert code not in CAPACITY_REFUSALS
+
+    def test_holding_the_name_already_is_not_a_capacity_refusal(self):
+        """It is the ranking being obeyed, not overruled.
+
+        Until 2026-08-26 this was filed under `position-slots-full`, so a
+        high-scoring name we already owned re-signalled, got refused, and was
+        read as a better candidate turned away in favour of a worse one. The
+        account's own best position was manufacturing rank violations: 70 and
+        375 fell to 53 and 123 once the code was split out.
+        """
+
+        assert "entry:already-held" not in CAPACITY_REFUSALS

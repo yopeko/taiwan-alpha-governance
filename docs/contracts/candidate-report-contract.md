@@ -52,7 +52,10 @@ ADR-0002 的決策 3 與 4 目前只是文字：報告要並列兩個規模、�
 | `refusals_total` | 所有拒絕的總數 |
 | `ranking_function` | 候選據以排序的分數名稱；沒有排序則為空字串 |
 | `rank_consistency_violations` | 成交與排序不一致的場次數；無排序函式時為 −1（不適用）|
+| `rank_violation_codes` | 造成違反的理由碼與次數；無排序函式時為空 |
 | `selection_logic_measured` | 布林；判定規則見 §3 |
+
+`rank_violation_codes` 是 2026-08-26 補的。只有一個計數說得出規則破了，說不出破在哪，而那些理由碼講的不是同一件事：`position-slots-full` 是稀缺，成本或數量上限則是最高分的那檔塞不進去。兩者要分得開，這個數字才能讀。
 
 ### 2.3 譜系
 
@@ -100,6 +103,8 @@ entry:round-trip-cost-exceeds-planned-risk
 其餘（`not-tradable-restricted`、`no-opening-price`、`opened-below-stop` 等）與帳戶塞不塞得下無關，是該證券自己的狀態，不納入。
 
 最後一項是判斷：成本超過該部位被定量的風險，兼具兩者的性質，歸為容量，因為它隨帳戶規模變動而非隨證券變動。
+
+`entry:already-held` **不是容量拒絕**。已經持有那檔，代表排序被遵守了而不是被推翻。它在 2026-08-26 之前被併進 `position-slots-full`，而那個併法會拿帳戶自己最好的部位去製造違反：同一檔再次發出訊號、分數很高、因已持有被拒，於是看起來像是高分被擋、低分成交。改碼後 12-1 動能的違反數由 70／375 降到 53／123。
 
 ### 拒絕數仍為必填
 
