@@ -29,6 +29,7 @@ cd /c/project/tw-sepa-screener && ./.venv/Scripts/python.exe <script>
 | `m3/build_coverage_ledger.py` | 產生 G0-A 固定期間 1,160 列 coverage ledger | 新目錄 `data\raw_v2\m3_coverage_ledger_2026-08-16` |
 | `m3/derive_tpex_action_universe.py` | 由該窗口的官方報價推導上櫃公司行動回補的股票池 | 指定的 symbols JSON 與 manifest（封存唯讀）|
 | `m3/build_coverage_ledger_v5.py` | 六年窗口（2019-01-01 起）的 coverage ledger，含兩條上櫃公司行動 lane | 新目錄 `data\raw_v2\m3_coverage_ledger_2026-08-24-v5` |
+| `m6/rotation_feasibility.py` | 由凍結資料集量排序週轉率與成本閘門效果，**不跑回測** | 無（唯讀，輸出到 stdout）|
 
 `capture_tpex_actions.py` 另有 `--rewrite-manifest`：不送任何請求，只從 append-only ledger 重算 lane manifest。用於 manifest 被一次「什麼都沒做的續跑」覆寫之後的修復（見 [M3.16](../docs/evidence/m3-16-tpex-actions-2019-2023-2026-08-24.md) §4）。
 
