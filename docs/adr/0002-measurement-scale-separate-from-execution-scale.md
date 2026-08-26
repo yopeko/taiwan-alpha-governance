@@ -15,6 +15,8 @@
 | **決策 3 與 4** | [test_candidate_report_contract.py](../../tests/invariant/test_candidate_report_contract.py)（27 條）| **2026-08-26** |
 | 決策 4 的判定邏輯本身 | [test_rank_violation_check.py](../../tests/unit/test_rank_violation_check.py)（12 條）| 2026-08-26 |
 
+第一份通過決策 4 的候選報告與它踩出的四個管線瑕疵，見 [M6.3](../evidence/m6-3-first-ranked-candidate-2026-08-26.md)。
+
 最後兩條原本無法實作，因為它們描述的**候選報告產物不存在**。[契約](../contracts/candidate-report-contract.md)於 08-25 定案、產生器於 08-26 落地，債務至此清償。
 
 最後一列是同日補的。決策 4 的判定在真實回測中只走得到一半——稀缺分支結構上不會觸發，見 §決策 4 的第二次修訂——所以那一半只能由單元測試逼它動。

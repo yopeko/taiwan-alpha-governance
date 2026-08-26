@@ -67,7 +67,11 @@ from m5.ledger import (  # noqa: E402
 )
 
 SCHEMA_ID = "tw-alpha-m6-ledger-backtest/1.0.0"
-CANDIDATE_REPORT_SCHEMA = "tw-alpha-m6-candidate-report/1.0.0"
+# Bumped with the columns, not with the code. 1.0.0 through 2026-08-26, then
+# 1.2.0 when `rank_consistency_violations` was replaced by the scarcity and
+# sizing pair -- a reader matching an old report against this schema would
+# otherwise be told the columns are the ones it does not have.
+CANDIDATE_REPORT_SCHEMA = "tw-alpha-m6-candidate-report/1.2.0"
 CANDIDATE_REPORT_CONTRACT = "candidate-report-v1.2.0"
 
 # The median stop distance measured across the SEPA trades in M6 Phase 0.
@@ -535,7 +539,13 @@ def run(
         )["sha256"],
         "strategy": {
             "name": "close-above-n-session-high",
-            "note": "a pipeline probe, not a proposal",
+            # True of the unranked form, and it stayed in the manifest after a
+            # ranking made it a candidate. Derived now instead of asserted.
+            "note": (
+                "a candidate ranked by " + ranking_name
+                if ranking_name
+                else "a pipeline probe, not a proposal"
+            ),
             "lookback": lookback,
             "stop_pct": float(stop_pct),
             "max_holding_sessions": max_holding_sessions,

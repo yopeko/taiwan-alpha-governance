@@ -156,4 +156,5 @@ ADR-0002 決策 1 仍然拘束：M0 規模下產生的報酬數字不得作為�
 
 - [ADR-0002：衡量規模與執行規模分離](../adr/0002-measurement-scale-separate-from-execution-scale.md)
 - [M6.1 六年窗口重跑](../evidence/m6-1-six-year-rerun-2026-08-25.md)
+- [M6.3 第一個被排序的候選](../evidence/m6-3-first-ranked-candidate-2026-08-26.md)——第一份依本契約產出的報告，也是 v1.1.0 到 v1.2.0 那兩處修訂的來源
 - [候選策略封包契約](strategy-candidate-contract.md)
