@@ -6,8 +6,8 @@ The contract was drafted on 2026-08-25 and the producer landed on 2026-08-26,
 so the debt closes here.
 
 Decision 3: every report carries both scales and the cost gap between them.
-Decision 4: a report whose refusals dwarf its trades says so, in the field a
-reader would look at, and may not be used to rank candidates.
+Decision 4, as amended 2026-08-26: the verdict is whether selection followed a
+declared ranking, not how many candidates were turned away.
 
 The rules are checked against a real report rather than a fixture. A contract
 test that invents its own input proves the test can construct a passing case,
@@ -38,8 +38,23 @@ REQUIRED_COLUMNS = {
     "cost_share_of_capital",
     "cost_share_of_turnover",
     "refusals_total",
+    "ranking_function",
+    "rank_consistency_violations",
     "selection_logic_measured",
     "refusals_json",
+}
+
+# Contract v1.1.0 section 3. Refusals that mean the account could not take
+# another position, as opposed to this security not being tradable. The list
+# lives in the contract; it is repeated here so a silent edit to one shows up
+# as a disagreement rather than as agreement by construction.
+CAPACITY_REFUSALS = {
+    "entry:position-slots-full",
+    "entry:cash-reserve-floor-reached",
+    "entry:cash-cannot-cover-position-and-charged-commission",
+    "entry:breaches-total-open-risk-cap",
+    "entry:no-quantity-satisfies-every-cap",
+    "entry:round-trip-cost-exceeds-planned-risk",
 }
 
 REQUIRED_SCALES = {"m0-execution", "reference-measurement"}
@@ -119,17 +134,53 @@ class TestBothScalesArePresent:
         )
 
 
-class TestScarcityIsReported:
-    """ADR-0002 decision 4."""
+class TestSelectionLogicIsJudgedOnRankNotOnCounts:
+    """ADR-0002 decision 4, as amended 2026-08-26.
 
-    def test_the_verdict_matches_the_counts(self, report):
+    The rule used to be a count, and counting was wrong twice. Watching only
+    `position-slots-full` reported success when raising the slot cap merely
+    moved refusals into other codes; watching the total fixed that and still
+    failed every broad-signal candidate on arithmetic that says nothing about
+    whether its ranking was followed.
+    """
+
+    def test_the_verdict_requires_a_declared_ranking(self, report):
         for row in report:
-            expected = row["refusals_total"] <= row["completed_trades"] * 10
-            assert row["selection_logic_measured"] is expected, (
-                f"{row['scale']}: {row['refusals_total']:,} refusals against "
-                f"{row['completed_trades']} trades, but the report claims "
-                f"selection_logic_measured={row['selection_logic_measured']}"
-            )
+            if not row["ranking_function"]:
+                assert row["selection_logic_measured"] is False, (
+                    f"{row['scale']}: no ranking function is declared, so what "
+                    "the run measured was arrival order, whatever the counts say"
+                )
+
+    def test_the_verdict_requires_rank_consistent_fills(self, report):
+        for row in report:
+            if row["ranking_function"]:
+                expected = row["rank_consistency_violations"] == 0
+                assert row["selection_logic_measured"] is expected
+
+    def test_violations_are_marked_not_applicable_without_a_ranking(self, report):
+        """-1, never 0. Zero would read as "checked, and none found"."""
+
+        for row in report:
+            if not row["ranking_function"]:
+                assert row["rank_consistency_violations"] == -1
+
+    def test_the_verdict_does_not_follow_the_old_count_rule(self, report):
+        """The amendment has to have actually changed something.
+
+        If every row still happened to agree with `total <= trades * 10`, the
+        new rule would be indistinguishable from the one it replaced and this
+        file would be asserting nothing new.
+        """
+
+        old_rule = [
+            row["refusals_total"] <= row["completed_trades"] * 10 for row in report
+        ]
+        new_rule = [row["selection_logic_measured"] for row in report]
+        assert any(row["ranking_function"] == "" for row in report) or old_rule == new_rule, (
+            "no row exercises the amended path; add a ranked candidate or a "
+            "fixture that does, or this test cannot tell the rules apart"
+        )
 
     def test_the_refusal_table_is_complete_not_a_top_n(self, report):
         """Contract section 2.2. A truncated table hides the codes that moved.
@@ -190,3 +241,27 @@ class TestTheReportSaysWhatItWasBuiltFrom:
         note = manifest.get("reading_note", "")
         assert "decision 1" in note.lower()
         assert "rank" in note.lower()
+
+
+class TestTheCapacityListMatchesTheContract:
+    """The enumeration decides what rank consistency is checked against."""
+
+    def test_the_contract_lists_every_code_this_test_knows(self):
+        contract = (
+            REPO / "docs" / "contracts" / "candidate-report-contract.md"
+        ).read_text(encoding="utf-8")
+        missing = [code for code in CAPACITY_REFUSALS if code not in contract]
+        assert not missing, (
+            f"the contract no longer lists {sorted(missing)}; the two copies "
+            "have to move together or the check silently narrows"
+        )
+
+    def test_a_security_specific_refusal_is_not_treated_as_capacity(self):
+        """These say the security could not be traded, not that we were full."""
+
+        for code in (
+            "entry:not-tradable-restricted",
+            "entry:no-opening-price",
+            "entry:opened-below-stop",
+        ):
+            assert code not in CAPACITY_REFUSALS

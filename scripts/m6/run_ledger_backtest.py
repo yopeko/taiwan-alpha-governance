@@ -367,6 +367,15 @@ def run(
             "lookback": lookback,
             "stop_pct": float(stop_pct),
             "max_holding_sessions": max_holding_sessions,
+            # Declared empty, and that is the honest answer. The entry loop
+            # walks `pending` in whatever order the signals were generated and
+            # counts everything after the slots fill as a refusal, so which
+            # names it holds is decided by arrival order.
+            #
+            # ADR-0002 decision 4, as amended on 2026-08-26, therefore marks
+            # this probe `selection-logic-not-measured` -- the same verdict the
+            # old rule gave, for the reason that is actually true of it.
+            "ranking_function": "",
         },
         "assumptions": {
             "participation_rate": float(PARTICIPATION_RATE),
@@ -455,6 +464,10 @@ def candidate_report(results: dict[str, dict[str, Any]]) -> tuple[list[dict], di
         refusals = {k: int(v) for k, v in result["refusals"].items()}
         total = sum(refusals.values())
         trades = int(result["completed_trades"])
+        ranking = str(result["strategy"].get("ranking_function") or "")
+        # Not applicable without a ranking, and -1 says so rather than 0,
+        # which would read as "checked, none found".
+        violations = int(result.get("rank_consistency_violations", -1)) if ranking else -1
         rows.append(
             {
                 "scale": scale,
@@ -468,11 +481,19 @@ def candidate_report(results: dict[str, dict[str, Any]]) -> tuple[list[dict], di
                     float(cost / turnover) if turnover else 0.0
                 ),
                 "refusals_total": total,
-                # Contract section 3: the total, never one reason code. Raising
-                # the slot cap on 2026-08-25 moved 277,777 slots-full refusals
-                # into other codes and left the total unchanged, so a rule
-                # watching one code would have reported success.
-                "selection_logic_measured": total <= trades * 10,
+                # Contract v1.1.0 section 3. The verdict is about whether
+                # selection followed a ranking, not about how many candidates
+                # were turned away: a screen over two thousand securities
+                # refuses six figures of signals however good its ranking is.
+                #
+                # Counting was tried twice and was wrong twice. Watching only
+                # `position-slots-full` reported success when raising the slot
+                # cap merely moved refusals into other codes; watching the
+                # total fixed that and still failed every broad-signal
+                # candidate on arithmetic that says nothing about its ranking.
+                "ranking_function": ranking,
+                "rank_consistency_violations": violations,
+                "selection_logic_measured": bool(ranking) and violations == 0,
                 "refusals_json": json.dumps(
                     dict(sorted(refusals.items())), ensure_ascii=False
                 ),

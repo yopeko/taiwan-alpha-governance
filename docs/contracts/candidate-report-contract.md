@@ -2,7 +2,7 @@
 
 | 欄位 | 值 |
 |---|---|
-| 契約版本 | `candidate-report-v1.0.0` |
+| 契約版本 | `candidate-report-v1.1.0`（2026-08-26；§3 判定由拒絕數改為排序一致性，見 [ADR-0002 決策 4 的修訂](../adr/0002-measurement-scale-separate-from-execution-scale.md)。其餘不變）|
 | 狀態 | `baseline-approved`，2026-08-25 |
 | 用途 | 強制 ADR-0002 決策 3 與 4；作為 M7 巢狀驗證的輸入格式 |
 | 核准 | Product Owner（單一簽核人，Owner 決定 2026-08-25）|
@@ -50,6 +50,8 @@ ADR-0002 的決策 3 與 4 目前只是文字：報告要並列兩個規模、�
 |---|---|
 | `refusals` | **每一個**理由碼與次數，不得只列前 N 名 |
 | `refusals_total` | 所有拒絕的總數 |
+| `ranking_function` | 候選據以排序的分數名稱；沒有排序則為空字串 |
+| `rank_consistency_violations` | 成交與排序不一致的場次數；無排序函式時為 −1（不適用）|
 | `selection_logic_measured` | 布林；判定規則見 §3 |
 
 ### 2.3 譜系
@@ -63,19 +65,45 @@ ADR-0002 的決策 3 與 4 目前只是文字：報告要並列兩個規模、�
 | `broker_terms` | 使用的條款，含 `evidence_state` 與是否含折讓 |
 | `built_at` | 產生時間 |
 
-## 3. 名額稀缺判定：數總數，不數單一理由碼
+## 3. 選股邏輯判定：看排序一致性，不看拒絕數
 
-`selection_logic_measured` 為偽，當
+**v1.1.0，2026-08-26**（依 [ADR-0002 決策 4 的修訂](../adr/0002-measurement-scale-separate-from-execution-scale.md)）。
+
+`selection_logic_measured` 為真，須同時滿足：
+
+1. `ranking_function` 非空——候選宣告了它據以排序的分數；且
+2. `rank_consistency_violations == 0`——同一場次中，沒有任何因**容量**被拒的候選，其分數高於當場開倉的任一部位。
+
+未宣告排序函式者一律為偽，**不論拒絕數多寡**。
+
+### 為什麼不再用拒絕數
+
+v1.0.0 的規則是 `refusals_total > completed_trades × 10`。它換過一次（原本只數 `position-slots-full`），而兩個版本都測錯了東西。
+
+把名額由 2 提到 20 之後 `position-slots-full` 由 277,777 掉到 584，總數卻幾乎不動（277,791 → 279,104）——**稀缺換了形狀**，所以只數一種理由碼會誤報成功。改數總數修好了那一點，但門檻**對廣訊號策略可能永遠無法滿足**：2,000 檔股票池、十萬量級的訊號，對上千量級的容量，即使排序完美也一樣。
+
+那條規則同時混著兩件事：**容量受限**（對任何篩選型策略都成立，不是缺陷）與**選擇無序**（名額滿時先到先得，才是缺陷）。排序一致性只測後者。
+
+### 「容量」拒絕的列舉
+
+以下理由碼視為容量拒絕，納入一致性檢查：
 
 ```
-refusals_total > completed_trades × 10
+entry:position-slots-full
+entry:cash-reserve-floor-reached
+entry:cash-cannot-cover-position-and-charged-commission
+entry:breaches-total-open-risk-cap
+entry:no-quantity-satisfies-every-cap
+entry:round-trip-cost-exceeds-planned-risk
 ```
 
-**是總數，不是 `entry:position-slots-full` 一種**（Owner 決定 2026-08-25）。
+其餘（`not-tradable-restricted`、`no-opening-price`、`opened-below-stop` 等）與帳戶塞不塞得下無關，是該證券自己的狀態，不納入。
 
-理由是量到的：2026-08-25 的名額掃描顯示，把名額由 2 提高到 20 之後 `position-slots-full` 由 277,777 掉到 584，看起來問題解決了——而**拒絕總數幾乎不變**（277,791 → 279,104）。同一批訊號改由成本上限、現金上限與最低股數擋下。
+最後一項是判斷：成本超過該部位被定量的風險，兼具兩者的性質，歸為容量，因為它隨帳戶規模變動而非隨證券變動。
 
-**稀缺會換形狀。** 只數一種理由碼的規則，會在放寬那一道閘門時報告成功，而實際上什麼都沒改變。
+### 拒絕數仍為必填
+
+`refusals`（全表）與 `refusals_total` 仍是必填欄位——**它們只是不再決定判定**。一份看不到拒絕分布的報告，讀者無法判斷帳戶被什麼擋住。
 
 `selection_logic_measured` 為偽時，該報告**不得用於候選之間的排序比較**。它仍可作為基礎建設驗證。
 
