@@ -100,11 +100,66 @@ def lot_legs(quantity: int) -> list[int]:
     return [leg for leg in (board, odd) if leg > 0]
 
 
+# Refusals that mean the account could not take another position, as opposed
+# to this security not being tradable. Rank consistency is checked against
+# these only: a name refused because it was halted says nothing about whether
+# the ranking was followed.
+#
+# `round-trip-cost-exceeds-planned-risk` is a judgement call and is counted as
+# capacity, because it moves with the size of the account rather than with the
+# security. The contract records the same call, and a test compares the two.
+CAPACITY_REFUSALS = frozenset(
+    {
+        "entry:position-slots-full",
+        "entry:cash-reserve-floor-reached",
+        "entry:cash-cannot-cover-position-and-charged-commission",
+        "entry:breaches-total-open-risk-cap",
+        "entry:no-quantity-satisfies-every-cap",
+        "entry:round-trip-cost-exceeds-planned-risk",
+    }
+)
+
+# 12-1 momentum: the return over the past twelve months excluding the most
+# recent one. Jegadeesh & Titman (1993) and the momentum literature that
+# followed it; the recent month is skipped because short-horizon returns
+# reverse, and including it mixes two opposing effects.
+#
+# Chosen for one reason: it was settled decades ago, on other markets, by
+# people who had never seen this dataset. Nothing about Taiwan 2019-2026 went
+# into it, so it cannot have been fitted to the window it is about to be
+# tested on. That is what makes it a prior rather than a result.
+#
+# Sessions rather than months, which is itself a conversion and therefore a
+# choice: 252 sessions back to 21 sessions back, the conventional annual and
+# monthly session counts.
+MOMENTUM_LOOKBACK_SESSIONS = 252
+MOMENTUM_SKIP_SESSIONS = 21
+
+
+def momentum_12_1(closes: list[float], i: int) -> float | None:
+    """Return from 252 sessions ago to 21 sessions ago. None if too short."""
+
+    if i < MOMENTUM_LOOKBACK_SESSIONS:
+        return None
+    start = closes[i - MOMENTUM_LOOKBACK_SESSIONS]
+    end = closes[i - MOMENTUM_SKIP_SESSIONS]
+    if start <= 0:
+        return None
+    return end / start - 1
+
+
+RANKINGS: dict[str, Any] = {
+    "": None,
+    "momentum-12-1": momentum_12_1,
+}
+
+
 @dataclass(frozen=True)
 class Signal:
     market: str
     symbol: str
     stop_price: Decimal
+    score: float | None = None
 
 
 @dataclass
@@ -131,6 +186,7 @@ def breakout_signals(
     *,
     lookback: int,
     stop_pct: Decimal,
+    ranking: Any = None,
 ) -> list[Signal]:
     """Close above the highest close of the previous `lookback` sessions.
 
@@ -152,9 +208,28 @@ def breakout_signals(
         close = Decimal(str(today["close"]))
         if close <= Decimal(str(max(window))):
             continue
+        score = None
+        if ranking is not None:
+            closes = [b["close"] for b in bars]
+            if any(c is None for c in closes):
+                # A gap in the history makes the score unreadable, and a
+                # missing score must not quietly sort as zero.
+                continue
+            score = ranking(closes, len(bars) - 1)
+            if score is None:
+                continue
         signals.append(
-            Signal(key[0], key[1], stop_price=close * (Decimal("1") - stop_pct))
+            Signal(
+                key[0],
+                key[1],
+                stop_price=close * (Decimal("1") - stop_pct),
+                score=score,
+            )
         )
+    # Highest score first. Without a ranking the order is whatever the history
+    # dict yielded, which is the arrival order the amended decision 4 is about.
+    if ranking is not None:
+        signals.sort(key=lambda s: s.score, reverse=True)
     return signals
 
 
@@ -165,6 +240,7 @@ def run(
     lookback: int,
     stop_pct: Decimal,
     max_holding_sessions: int,
+    ranking_name: str = "",
 ) -> dict[str, Any]:
     sessions, by_session = load_dataset(dataset_root)
     ledger = Ledger(opening_cash=opening_cash, sessions=[date.fromisoformat(s) for s in sessions])
@@ -174,6 +250,16 @@ def run(
     pending: list[Signal] = []
     trades: list[dict[str, Any]] = []
     refusals: dict[str, int] = defaultdict(int)
+    ranking = RANKINGS[ranking_name]
+    # Deep enough for whichever needs more history, the entry rule or the
+    # ranking. Trimming to the breakout lookback alone left 22 bars, and a
+    # 252-session momentum read against 22 bars scores nothing at all.
+    history_depth = lookback + 2
+    if ranking_name == "momentum-12-1":
+        history_depth = max(history_depth, MOMENTUM_LOOKBACK_SESSIONS + 2)
+    # Sessions where a candidate refused for capacity outscored one that was
+    # opened. Zero is the claim that fills followed the ranking.
+    rank_violations = 0
     equity: list[dict[str, Any]] = []
     order_seq = 0
 
@@ -269,19 +355,27 @@ def run(
                 del positions[key]
 
         # --- entries, from yesterday's signals ----------------------------
+        opened_scores: list[float] = []
+        capacity_refused_scores: list[float] = []
+
+        def note_refusal(code: str, signal: Signal) -> None:
+            refusals[code] += 1
+            if signal.score is not None and code in CAPACITY_REFUSALS:
+                capacity_refused_scores.append(signal.score)
+
         for signal in pending:
             key = (signal.market, signal.symbol)
             if key in positions or len(positions) >= POLICY_MAX_POSITIONS:
-                refusals["entry:position-slots-full"] += 1
+                note_refusal("entry:position-slots-full", signal)
                 continue
             row = rows.get(key)
             if row is None or row.get("open") is None:
-                refusals["entry:no-opening-price"] += 1
+                note_refusal("entry:no-opening-price", signal)
                 continue
             entry = Decimal(str(row["open"]))
             if entry <= signal.stop_price:
                 # The gap opened below the stop the signal was sized against.
-                refusals["entry:opened-below-stop"] += 1
+                note_refusal("entry:opened-below-stop", signal)
                 continue
             # M0 section 8 caps *total* open risk at 2.00% of NAV, not just
             # the risk of each position taken alone. `plan_position` enforces
@@ -310,12 +404,12 @@ def run(
                 settled_cash=ledger.buying_power,
             )
             if not plan.is_trade:
-                refusals[f"entry:{plan.reason}"] += 1
+                note_refusal(f"entry:{plan.reason}", signal)
                 continue
             order_seq += 1
             market = conditions(key)
             if market is None:
-                refusals["entry:no-market-conditions"] += 1
+                note_refusal("entry:no-market-conditions", signal)
                 continue
             result = ledger.execute(
                 OrderRequest(
@@ -338,18 +432,34 @@ def run(
                     stop_price=signal.stop_price,
                     quantity=result.filled_quantity,
                 )
+                if signal.score is not None:
+                    opened_scores.append(signal.score)
             else:
-                refusals[f"entry:{result.reason}"] += 1
+                note_refusal(f"entry:{result.reason}", signal)
+
+        # A capacity refusal that outscored something we opened means the
+        # ranking was not what decided the book that session. Compared at the
+        # extremes because that is where the rule breaks first: the best name
+        # turned away against the worst one taken.
+        if opened_scores and capacity_refused_scores:
+            if max(capacity_refused_scores) > min(opened_scores):
+                rank_violations += 1
 
         # --- today's signals fill tomorrow --------------------------------
         for key, row in rows.items():
             if row["close"] is not None:
                 history[key].append(row)
-                if len(history[key]) > lookback + 2:
+                if len(history[key]) > history_depth:
                     history[key].pop(0)
         pending = [
             s
-            for s in breakout_signals(history, session, lookback=lookback, stop_pct=stop_pct)
+            for s in breakout_signals(
+                history,
+                session,
+                lookback=lookback,
+                stop_pct=stop_pct,
+                ranking=ranking,
+            )
             if rows[(s.market, s.symbol)]["tradability_state"] == TRADABLE_STATE
         ]
 
@@ -367,16 +477,14 @@ def run(
             "lookback": lookback,
             "stop_pct": float(stop_pct),
             "max_holding_sessions": max_holding_sessions,
-            # Declared empty, and that is the honest answer. The entry loop
-            # walks `pending` in whatever order the signals were generated and
-            # counts everything after the slots fill as a refusal, so which
-            # names it holds is decided by arrival order.
-            #
-            # ADR-0002 decision 4, as amended on 2026-08-26, therefore marks
-            # this probe `selection-logic-not-measured` -- the same verdict the
-            # old rule gave, for the reason that is actually true of it.
-            "ranking_function": "",
+            # Empty means no ranking, and that is an honest answer rather than
+            # a missing field: the entry loop then walks `pending` in whatever
+            # order the signals were generated, so which names it holds is
+            # decided by arrival order. ADR-0002 decision 4, as amended on
+            # 2026-08-26, marks such a run `selection-logic-not-measured`.
+            "ranking_function": ranking_name,
         },
+        "rank_consistency_violations": rank_violations if ranking_name else -1,
         "assumptions": {
             "participation_rate": float(PARTICIPATION_RATE),
             "signal_on_close_fill_next_open": True,
@@ -563,12 +671,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--lookback", type=int, default=20)
     parser.add_argument("--stop-pct", type=Decimal, default=Decimal("0.08"))
     parser.add_argument("--max-holding-sessions", type=int, default=20)
+    parser.add_argument(
+        "--ranking",
+        choices=sorted(RANKINGS),
+        default="",
+        help=(
+            "score used to order candidates when slots are scarce. Empty means "
+            "none, which is arrival order and can never be selection-measured"
+        ),
+    )
     args = parser.parse_args(argv)
 
     common = dict(
         lookback=args.lookback,
         stop_pct=args.stop_pct,
         max_holding_sessions=args.max_holding_sessions,
+        ranking_name=args.ranking,
     )
 
     if args.report_root:
