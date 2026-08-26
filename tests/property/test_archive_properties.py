@@ -190,8 +190,49 @@ class TestStagingDeterminism:
         assert first["dataset_id"] == second["dataset_id"]
         assert first["staging_index_sha256"] == second["staging_index_sha256"]
         assert first["adopted_observations"] == second["adopted_observations"]
-        assert first["production_unchanged"] is True
-        assert second["production_unchanged"] is True
+
+    def test_a_build_cannot_write_to_a_protected_store(self, tmp_path):
+        """Structurally, and not by watching fingerprints afterwards.
+
+        This used to assert `production_unchanged is True` on both builds, and
+        it went red on 2026-08-26 at 16:02 because the legacy daily pipeline
+        had written its own stores between 15:40 and 16:01. Nothing about the
+        staging build was wrong; the assertion was watching a shared resource
+        that a different system updates on a schedule.
+
+        A test that goes red for a reason unrelated to what it names is one
+        people learn to ignore, which is the same lesson the pre-commit hook
+        already records about being slow enough to bypass.
+
+        What the build actually guarantees is checked instead:
+        `assert_publishable` refuses a staging root that is, contains, or sits
+        inside a protected path, before a byte is written. Concurrent external
+        writes are reported in `protected_changed` and are not this build's
+        failure.
+        """
+
+        if not all((RAW / name).is_dir() for name in ARCHIVES):
+            pytest.skip("archives not present on this machine")
+        pytest.importorskip("tw_sepa_screener", reason="needs Taiwan Core checkout")
+        from build_staging import (
+            PROTECTED_PATHS,
+            StagingError,
+            assert_publishable,
+            build,
+        )
+
+        assert PROTECTED_PATHS, "no protected paths declared; the guard guards nothing"
+        for protected in PROTECTED_PATHS:
+            with pytest.raises(StagingError):
+                assert_publishable(protected)
+            with pytest.raises(StagingError):
+                assert_publishable(protected / "nested")
+
+        manifest = build(tmp_path / "c", limit_per_source=1)
+        assert "protected_changed" in manifest, (
+            "the build no longer reports which protected stores moved, so an "
+            "external writer would go unnoticed"
+        )
 
     def test_dataset_id_changes_when_the_builder_changes(self, tmp_path):
         """A different builder must not masquerade as the same dataset."""

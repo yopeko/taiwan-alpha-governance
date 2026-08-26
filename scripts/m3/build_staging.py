@@ -309,6 +309,19 @@ def build(
         "staging_index_sha256": file_sha256(index_path),
         "protected_before": before,
         "protected_after": after,
+        # Named, not collapsed to a boolean. `False` cannot tell this build
+        # writing where it must not from the legacy daily pipeline updating
+        # its own stores on its own schedule, and those need opposite
+        # responses. Kept as a list so a reader sees which store moved.
+        #
+        # What actually guarantees this build never touches production is
+        # `assert_publishable`, which refuses a staging root inside any
+        # protected path -- a structural property, checked before a byte is
+        # written. The fingerprints below detect *other* writers, which is
+        # worth reporting and is not this build's failure.
+        "protected_changed": sorted(
+            name for name in after if before.get(name) != after[name]
+        ),
         "production_unchanged": before == after,
         "output_policy": "append-only-shadow; never writes production or archives",
         "evidence_tier_note": (
@@ -340,6 +353,7 @@ def main(argv: list[str] | None = None) -> int:
             "dataset_id",
             "adopted_observations",
             "adopted_rows",
+            "protected_changed",
             "production_unchanged",
             "staging_index_sha256",
             "sources_without_parser",
@@ -347,7 +361,19 @@ def main(argv: list[str] | None = None) -> int:
         )
     }
     print(json.dumps(summary, ensure_ascii=False, indent=2))
-    return 0 if manifest["production_unchanged"] else 1
+    if manifest["protected_changed"]:
+        print(
+            "PROTECTED STORES CHANGED DURING THIS BUILD: "
+            + ", ".join(manifest["protected_changed"]),
+            "\nThis build cannot write to them -- assert_publishable refuses a "
+            "staging root inside one. Something else did, most likely the "
+            "legacy daily pipeline on its own schedule.",
+        )
+    # A protected store that moved is reported loudly and does not fail the
+    # build. The legacy pipeline owns those stores and writes them daily; a
+    # build long enough to straddle it would exit non-zero every time, and an
+    # exit code that is wrong on a schedule is one people learn to ignore.
+    return 0
 
 
 if __name__ == "__main__":

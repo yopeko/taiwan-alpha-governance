@@ -303,7 +303,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     print(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True))
     failures = counts.get("transport-error", 0) + counts.get("parse-error-uncaptured", 0)
-    return 0 if manifest["production_unchanged"] and failures == 0 else 1
+    # A protected store that moved is reported loudly and does not fail the
+    # run. The legacy daily pipeline owns those stores and writes them on its
+    # own schedule; a capture long enough to straddle it would exit non-zero
+    # every time, and an exit code that is wrong on a schedule is one people
+    # learn to ignore. What keeps a capture out of production is
+    # require_daily_price_output_root, checked before anything is written.
+    return 0 if failures == 0 else 1
 
 
 if __name__ == "__main__":
