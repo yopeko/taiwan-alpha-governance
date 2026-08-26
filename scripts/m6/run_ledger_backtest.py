@@ -45,17 +45,35 @@ import pyarrow.parquet as pq
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 
-from m4.rules import BOARD_LOT, Side  # noqa: E402
+import pyarrow as pa  # noqa: E402
+
+from m4.rules import (  # noqa: E402
+    BOARD_LOT,
+    RULES_VERSION,
+    BrokerTerms,
+    Side,
+    trade_costs,
+)
 from m5.ledger import (  # noqa: E402
+    LEDGER_VERSION,
     Ledger,
     MarketConditions,
     OrderRequest,
+    POLICY_INITIAL_CAPITAL,
     POLICY_MAX_POSITIONS,
+    POLICY_PLANNED_RISK,
     TRADABLE_STATE,
     plan_position,
 )
 
 SCHEMA_ID = "tw-alpha-m6-ledger-backtest/1.0.0"
+CANDIDATE_REPORT_SCHEMA = "tw-alpha-m6-candidate-report/1.0.0"
+CANDIDATE_REPORT_CONTRACT = "candidate-report-v1.0.0"
+
+# The median stop distance measured across the SEPA trades in M6 Phase 0.
+# Used only to turn the risk budget into a position size when deriving the
+# reference scale; the real size follows each signal own stop.
+MEDIAN_STOP_DISTANCE = Decimal("0.08")
 
 # What fraction of a session's volume one account may assume it can take.
 # M0 forbids assuming a fill; this is the assumption that replaces "always",
@@ -372,23 +390,203 @@ def run(
     return manifest
 
 
+def reference_scale_nav() -> Decimal:
+    """The NAV whose positions clear the minimum commission.
+
+    ADR-0002 decision 2 forbids writing this down: the reference scale is the
+    smallest position at which the minimum commission stops binding, and that
+    is a function of the broker terms in force. Derived here by asking
+    `trade_costs`, so it moves when the terms move instead of becoming a
+    constant that quietly describes last year's schedule.
+
+    Position size follows M0 section 8: the planned risk over the median stop
+    distance measured in M6 Phase 0.
+    """
+
+    terms = BrokerTerms()
+    low, high = 1, 5_000_000
+    while low < high:
+        mid = (low + high) // 2
+        if trade_costs(
+            side=Side.BUY, price=Decimal(1), quantity=mid, terms=terms
+        ).minimum_commission_applied:
+            low = mid + 1
+        else:
+            high = mid
+    position_share = POLICY_PLANNED_RISK / MEDIAN_STOP_DISTANCE
+    return (Decimal(low) / position_share).quantize(Decimal("1"))
+
+
+def realised_costs(result: dict[str, Any]) -> tuple[Decimal, Decimal]:
+    """Commission and tax actually charged, and the turnover they were charged on.
+
+    Recomputed from the fills rather than carried, so a report cannot claim a
+    cost the rules module would not produce for the same trades.
+    """
+
+    terms = BrokerTerms()
+    cost = Decimal("0")
+    turnover = Decimal("0")
+    for trade in result["trades"]:
+        quantity = int(trade["quantity"])
+        for side, price in (
+            (Side.BUY, trade["entry_price"]),
+            (Side.SELL, trade["exit_price"]),
+        ):
+            leg = trade_costs(
+                side=side, price=Decimal(str(price)), quantity=quantity, terms=terms
+            )
+            cost += leg.total_cost
+            turnover += leg.gross
+    return cost, turnover
+
+
+def candidate_report(results: dict[str, dict[str, Any]]) -> tuple[list[dict], dict]:
+    """One row per scale, plus the manifest, per the candidate report contract.
+
+    Both scales are required. A report carrying one is not a simpler report,
+    it is a report missing a field: ADR-0002 decision 3 asks for the gap
+    between them, and a gap needs two numbers.
+    """
+
+    rows: list[dict[str, Any]] = []
+    for scale, result in sorted(results.items()):
+        cost, turnover = realised_costs(result)
+        refusals = {k: int(v) for k, v in result["refusals"].items()}
+        total = sum(refusals.values())
+        trades = int(result["completed_trades"])
+        rows.append(
+            {
+                "scale": scale,
+                "opening_cash": float(result["opening_cash"]),
+                "return_pct": float(result["return_pct"]),
+                "drawdown_pct": float(result["drawdown_pct"]),
+                "completed_trades": trades,
+                "cost_total": float(cost),
+                "cost_share_of_capital": float(cost) / float(result["opening_cash"]),
+                "cost_share_of_turnover": (
+                    float(cost / turnover) if turnover else 0.0
+                ),
+                "refusals_total": total,
+                # Contract section 3: the total, never one reason code. Raising
+                # the slot cap on 2026-08-25 moved 277,777 slots-full refusals
+                # into other codes and left the total unchanged, so a rule
+                # watching one code would have reported success.
+                "selection_logic_measured": total <= trades * 10,
+                "refusals_json": json.dumps(
+                    dict(sorted(refusals.items())), ensure_ascii=False
+                ),
+            }
+        )
+
+    sample = next(iter(results.values()))
+    terms = BrokerTerms()
+
+    # The warehouse id lives in the dataset's own manifest, not in the run.
+    # Read rather than defaulted: an empty lineage field is indistinguishable
+    # from a report built against a warehouse nobody can name, and the
+    # contract test caught exactly that when this defaulted to "".
+    dataset_manifest_path = Path(sample["dataset_root"]) / "dataset_manifest.json"
+    dataset_manifest = json.loads(dataset_manifest_path.read_bytes())
+    warehouse_id = dataset_manifest.get("warehouse_dataset_id")
+    if not warehouse_id:
+        raise SystemExit(
+            f"{dataset_manifest_path} carries no warehouse_dataset_id; refusing "
+            "to emit a report whose lineage cannot be resolved"
+        )
+
+    manifest = {
+        "schema_id": CANDIDATE_REPORT_SCHEMA,
+        "contract_version": CANDIDATE_REPORT_CONTRACT,
+        "built_at": datetime.now(timezone.utc).isoformat(),
+        "scales": sorted(results),
+        "dataset_sha256": sample["dataset_sha256"],
+        "dataset_root": str(sample["dataset_root"]),
+        "warehouse_dataset_id": warehouse_id,
+        "warehouse_roots": dataset_manifest.get("warehouse_roots", {}),
+        "strategy_version": sample["strategy"],
+        "rules_version": RULES_VERSION,
+        "ledger_version": LEDGER_VERSION,
+        "broker_terms": {
+            "commission_rate": str(terms.commission_rate),
+            "minimum_commission": str(terms.minimum_commission),
+            "sell_tax_rate": str(terms.sell_tax_rate),
+            "evidence_state": terms.evidence_state,
+            "has_rebate": terms.has_rebate,
+            "source": terms.source,
+        },
+        "assumptions": sample["assumptions"],
+        "reading_note": (
+            "ADR-0002 decision 1: figures produced at the m0-execution scale "
+            "are not evidence about a strategy. Decision 4: a row whose "
+            "selection_logic_measured is false may not be used to rank "
+            "candidates against one another."
+        ),
+    }
+    return rows, manifest
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset", type=Path, required=True)
     parser.add_argument("--out", type=Path)
+    parser.add_argument(
+        "--report-root",
+        type=Path,
+        help=(
+            "emit a candidate report per docs/contracts/candidate-report-contract.md. "
+            "Runs both scales, because the contract requires both"
+        ),
+    )
     parser.add_argument("--opening-cash", type=Decimal, default=Decimal("10000"))
     parser.add_argument("--lookback", type=int, default=20)
     parser.add_argument("--stop-pct", type=Decimal, default=Decimal("0.08"))
     parser.add_argument("--max-holding-sessions", type=int, default=20)
     args = parser.parse_args(argv)
 
-    result = run(
-        args.dataset,
-        opening_cash=args.opening_cash,
+    common = dict(
         lookback=args.lookback,
         stop_pct=args.stop_pct,
         max_holding_sessions=args.max_holding_sessions,
     )
+
+    if args.report_root:
+        scales = {
+            "m0-execution": POLICY_INITIAL_CAPITAL,
+            "reference-measurement": reference_scale_nav(),
+        }
+        results = {
+            name: run(args.dataset, opening_cash=cash, **common)
+            for name, cash in scales.items()
+        }
+        rows, manifest = candidate_report(results)
+        root = args.report_root
+        root.mkdir(parents=True, exist_ok=True)
+        pq.write_table(pa.Table.from_pylist(rows), root / "candidate_report.parquet")
+        (root / "report_manifest.json").write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+        for row in rows:
+            print(
+                f"{row['scale']:<24} 期初 {row['opening_cash']:>10,.0f}"
+                f"  報酬 {row['return_pct']:>7.2f}%"
+                f"  回撤 {row['drawdown_pct']:>6.2f}%"
+                f"  成交 {row['completed_trades']:>5}"
+                f"  成本/期初 {row['cost_share_of_capital']:>6.1%}"
+                f"  成本/成交額 {row['cost_share_of_turnover']:>6.2%}"
+            )
+            if not row["selection_logic_measured"]:
+                print(
+                    f"  {row['scale']}: selection-logic-not-measured "
+                    f"({row['refusals_total']:,} refusals against "
+                    f"{row['completed_trades']} trades). This row may not rank "
+                    "candidates against one another."
+                )
+        print(f"\n候選報告寫入 {root}")
+        return 0
+
+    result = run(args.dataset, opening_cash=args.opening_cash, **common)
     print(f"資料集      {Path(result['dataset_root']).name}  ({result['dataset_sha256'][:16]}…)")
     print(f"策略        {result['strategy']['name']}  lookback={result['strategy']['lookback']}"
           f"  stop={result['strategy']['stop_pct']:.0%}")

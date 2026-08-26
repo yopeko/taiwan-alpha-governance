@@ -45,3 +45,8 @@ WAREHOUSE_ROOTS = {
 RESEARCH_DATASET = SCRATCH / "tw-alpha-m6-dataset-08"
 RESEARCH_DATASET_GENERATION = "2026-08-20 382-session build, not yet rebuilt"
 RESEARCH_DATASET_PRICES = SCRATCH / "tw-alpha-m3-pit-prices-09"
+
+# The candidate report the ADR-0002 contract tests read. Named here for the
+# same reason as everything else in this file: five test files once each
+# pinned their own scratch path and went on checking the previous generation.
+CANDIDATE_REPORT = SCRATCH / "tw-alpha-m6-report-01"

@@ -41,6 +41,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "m3"))
 # where both can read them rather than being duplicated here.
 from current_build import (  # noqa: E402,F401
     CALENDAR,
+    CANDIDATE_REPORT,
     GENERATION,
     PRICES,
     RESEARCH_DATASET,
