@@ -332,6 +332,20 @@ class BrokerTerms:
     rebate_payment_day: int | None = None
     rebate_scope: str = "commission-only"
 
+    # When these terms were in force. A promotion is not a property of the
+    # broker, it is a property of a date range, and terms applied outside
+    # their range are a claim about a period they did not govern.
+    #
+    # SinoPac's 2026 promotion is the case that put these here: it takes the
+    # minimum commission from NT$20 to NT$1, a tenfold move in the cost of a
+    # NT$904 position, and it ends. A backtest over 2019-2026 configured with
+    # it is asking "what if I had traded that history on today's terms" --
+    # a legitimate question, and a different one from "what happened".
+    #
+    # Left None the terms are undated and every existing caller is unchanged.
+    effective_from: date | None = None
+    effective_through: date | None = None
+
     def __post_init__(self) -> None:
         for name in (
             "commission_rate",
@@ -371,6 +385,16 @@ class BrokerTerms:
                 )
             if not 1 <= self.rebate_payment_day <= 28:
                 raise RuleError("rebate_payment_day must be a day every month has")
+
+        if (
+            self.effective_from is not None
+            and self.effective_through is not None
+            and self.effective_from > self.effective_through
+        ):
+            raise RuleError(
+                "these terms end before they begin, so no session is covered "
+                "by them and every window would report as uncovered"
+            )
         # The tax is statutory. A broker cannot discount it, so a rebate that
         # claimed to reach it would be describing something that cannot happen.
         if self.rebate_scope != "commission-only":
@@ -404,6 +428,32 @@ def _truncate_to_dollar(value: Decimal) -> Decimal:
     """Taiwan brokers bill whole NTD, truncating the fraction."""
 
     return value.to_integral_value(rounding=ROUND_DOWN)
+
+
+def terms_cover(terms: BrokerTerms, start: date, end: date) -> str:
+    """How much of [start, end] these terms were actually in force for.
+
+    Returns one of `undated`, `covers-window`, `covers-part-of-window`,
+    `covers-none-of-window`. A string rather than a bool: the interesting case
+    is the middle one, and a bool would have to fold it into one of the ends.
+
+    Nothing here refuses. Deciding what to do about a partial cover belongs to
+    whoever is making the claim -- pricing a 2019-2026 backtest entirely on a
+    promotion that ran in 2026 is a defensible question to ask, and an
+    indefensible thing to leave unlabelled.
+    """
+
+    if terms.effective_from is None and terms.effective_through is None:
+        return "undated"
+    if start > end:
+        raise RuleError("the window ends before it begins")
+    begins = terms.effective_from or date.min
+    ends = terms.effective_through or date.max
+    if begins <= start and end <= ends:
+        return "covers-window"
+    if ends < start or end < begins:
+        return "covers-none-of-window"
+    return "covers-part-of-window"
 
 
 def rebate_due_on(filled: date, terms: BrokerTerms) -> date | None:

@@ -13,6 +13,7 @@ that cannot fork the file anyway.
 from __future__ import annotations
 
 import hashlib
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -49,6 +50,38 @@ def test_the_two_copies_are_byte_identical(mirror, canonical, name):
         f"{mirror.name} and tw_sepa_screener.{name} have diverged. One of them "
         "was edited directly; copy the intended version over the other rather "
         "than reconciling by hand"
+    )
+
+
+@pytest.mark.parametrize("mirror,canonical,name", UPSTREAMED)
+def test_the_canonical_copy_is_under_version_control(mirror, canonical, name):
+    """Byte-identity to an untracked file proves less than it looks like.
+
+    Found on 2026-08-27: neither `market_rules.py` nor `ledger.py` had ever
+    been committed in Taiwan Core. They sat in its working tree, untracked and
+    not ignored, while M4.2 and the milestone register both described them as
+    the canonical copy and this repository's copies as mirrors of them.
+
+    Every other test in this file passed throughout. They compare two files
+    and check that one imports; none of them asks whether the side called
+    canonical has any history. A file with no commit cannot be diffed, blamed,
+    reverted or recovered, so the direction of authority was backwards: the
+    mirror was the only version under control.
+    """
+
+    if not canonical.is_file():
+        pytest.skip("Taiwan Core checkout not present on this machine")
+    result = subprocess.run(
+        ["git", "ls-files", "--error-unmatch", "--", canonical.name],
+        cwd=canonical.parent,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, (
+        f"tw_sepa_screener/{canonical.name} is not tracked in Taiwan Core's "
+        "git. It is described as the canonical copy, and an untracked file "
+        "has no history to be canonical with -- commit it there, or say in "
+        "the milestone register which copy actually is authoritative"
     )
 
 

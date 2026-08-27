@@ -123,5 +123,13 @@ Taiwan Core 的工作樹在本次之前就已是 dirty(數十個與本工作無�
 
 ## 9. 未解決
 
-1. **Taiwan Core 未 commit**——其工作樹的既有 dirty 狀態早於本次工作,是否整理屬 Owner 決定。
+1. ~~**Taiwan Core 未 commit**——其工作樹的既有 dirty 狀態早於本次工作,是否整理屬 Owner 決定。~~
+
+   **2026-08-27 解決，且它不是整潔問題。** 未 commit 的正是 `market_rules.py` 與 `ledger.py` 本身——兩個檔案從上游化那天起就是 untracked，不是被 ignore，只是從未 `git add`。
+
+   本文件與里程碑登錄都寫著它們是 canonical、治理倉庫這邊是雜湊強制一致的鏡像。實際的權威方向是反的：**有 git 歷史的只有鏡像**。一個沒有 commit 的檔案無法 diff、blame、revert 或復原。
+
+   parity 測試組從頭到尾全綠。它比對兩份檔案位元相同、檢查兩者可 import，沒有一條問過被稱為 canonical 的那一份有沒有歷史。
+
+   Owner 於 2026-08-27 裁示在 Taiwan Core 提交（`afce687`，1,402 行）。`test_the_canonical_copy_is_under_version_control` 從此盯著它，任一份再度脫離版控即轉紅。
 2. **M5 現金／股票帳本尚未開始**——`test_no_impossible_trade_can_settle` 仍為 strict xfail。

@@ -52,6 +52,7 @@ from m4.rules import (  # noqa: E402
     RULES_VERSION,
     BrokerTerms,
     Side,
+    terms_cover,
     trade_costs,
 )
 from m5.ledger import (  # noqa: E402
@@ -167,6 +168,7 @@ def count_rank_violation(
         return None
     best_score, best_code = max(candidates)
     return best_code if best_score > min(opened) else None
+
 
 # 12-1 momentum: the return over the past twelve months excluding the most
 # recent one. Jegadeesh & Titman (1993) and the momentum literature that
@@ -570,6 +572,10 @@ def run(
         "final_nav": final_nav,
         "return_pct": (final_nav / float(opening_cash) - 1) * 100,
         "sessions": len(sessions),
+        # The window these figures were priced over. Needed to say whether the
+        # broker terms used were in force for it -- a count of sessions cannot.
+        "first_session": sessions[0],
+        "last_session": sessions[-1],
         "completed_trades": len(trades),
         "open_at_end": len(positions),
         "high_water_mark": float(ledger.high_water_mark),
@@ -697,6 +703,8 @@ def candidate_report(results: dict[str, dict[str, Any]]) -> tuple[list[dict], di
 
     sample = next(iter(results.values()))
     terms = BrokerTerms()
+    window_start = date.fromisoformat(sample["first_session"])
+    window_end = date.fromisoformat(sample["last_session"])
 
     # The warehouse id lives in the dataset's own manifest, not in the run.
     # Read rather than defaulted: an empty lineage field is indistinguishable
@@ -730,6 +738,19 @@ def candidate_report(results: dict[str, dict[str, Any]]) -> tuple[list[dict], di
             "evidence_state": terms.evidence_state,
             "has_rebate": terms.has_rebate,
             "source": terms.source,
+            # Whether these terms were in force for the window they priced.
+            # Undated for the research defaults, which belong to no broker and
+            # therefore to no date range. It matters for a real schedule: the
+            # SinoPac promotion runs for 2026 and the dataset starts in 2019,
+            # so pricing the whole window on it is a claim about a period the
+            # terms did not govern -- fair to ask, not fair to leave unsaid.
+            "effective_from": (
+                str(terms.effective_from) if terms.effective_from else None
+            ),
+            "effective_through": (
+                str(terms.effective_through) if terms.effective_through else None
+            ),
+            "covers_priced_window": terms_cover(terms, window_start, window_end),
         },
         "assumptions": sample["assumptions"],
         "reading_note": (

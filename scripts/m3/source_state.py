@@ -38,11 +38,15 @@ PRODUCER_COMMIT = "fb87f62f8c2c68e2b85982cd102a35fd935bc0a4"
 #              towards NAV but never towards buying power.
 #   4e04f0ca…  184 files.  m0-v1.1.0 (D16): the slot count and the total open
 #              risk cap moved together, 2 to 10 and 2.00% to 7.50%.
+#   6945196b…  184 files.  BrokerTerms gained a validity window, so a set of
+#              terms can say which sessions it governed. Same file count: both
+#              modules were already in the checkout -- they were untracked,
+#              which is why `git ls-files --others` had been counting them.
 #
 # Superseding the value here does not rewrite what an existing archive
 # recorded. Those are historical facts and stay as captured.
 SOURCE_STATE_FINGERPRINT = (
-    "4e04f0ca7929b752cb6124d038d0f1120fe4bbf43c285f1f4c02b68251af98ea"
+    "6945196b4051652a74d1a1510dc7310c11fb8e4db0effa1fd2337d5d827fd233"
 )
 
 SOURCE_STATE_HISTORY: tuple[tuple[str, str], ...] = (
@@ -69,6 +73,10 @@ SOURCE_STATE_HISTORY: tuple[tuple[str, str], ...] = (
     (
         "4e04f0ca7929b752cb6124d038d0f1120fe4bbf43c285f1f4c02b68251af98ea",
         "m0-v1.1.0: slots 2 to 10, total open risk 2.00% to 7.50% (D16)",
+    ),
+    (
+        "6945196b4051652a74d1a1510dc7310c11fb8e4db0effa1fd2337d5d827fd233",
+        "BrokerTerms carries the window its terms were in force for",
     ),
 )
 
