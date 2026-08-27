@@ -5,7 +5,7 @@
 | 欄位 | 值 |
 |---|---|
 | 專案 ID | `tw-alpha-platform` |
-| 契約版本 | `m0-v1.1.0`（2026-08-25；§8 最大持股數 2 → 10、總開放風險上限 2.00% → 7.50%，見 [D16](evidence/m3-owner-decision-d16-2026-08-25.md)。其餘條款不變）|
+| 契約版本 | `m0-v1.2.0`（2026-08-27；§7.2 與 §12 的 M10 阻擋事由改寫，見 [D17](evidence/m3-owner-decision-d17-2026-08-27.md)。v1.1.0 於 2026-08-25 改 §8 名額與風險上限，見 [D16](evidence/m3-owner-decision-d16-2026-08-25.md)）|
 | 狀態 | `baseline-approved-for-planning` |
 | 生效日 | 2026-08-02 |
 | 時區 | `Asia/Taipei` |
@@ -145,7 +145,14 @@ AI 可以摘要或解釋，但無權：
 | 基準滑價 | 每側 0.20% | 日線及零股保守研究假設 |
 | 壓力測試 | 可變成本及滑價的 1.5、2、3 倍 | 評估脆弱性 |
 
-所有候選必須在相同成本模型下比較並通過至少 2 倍成本壓力後，才可由 `research` 申請進入 `validated`。真實 canary 在取得實際券商費率、最低費用及零股計費規則前為 `blocked`。
+所有候選必須在相同成本模型下比較並通過至少 2 倍成本壓力後，才可由 `research` 申請進入 `validated`。
+
+**真實 canary 在取得下列兩項前為 `blocked`（`m0-v1.2.0`，[D17](evidence/m3-owner-decision-d17-2026-08-27.md)）：**
+
+1. **簽署的券商條款**。已發布的費率頁與具名者的口頭答覆都不是契約。
+2. **零股成交證據**——一筆零股委託在當時會不會成交。日線資料答不出這件事。
+
+v1.1.0 以前此處寫的是「取得實際券商費率、最低費用及零股計費規則前為 `blocked`」。那三項於 2026-08-25 全部取得（[D14／D15](evidence/m3-owner-decisions-d14-d15-2026-08-25.md)，條款落於 `scripts/lib/broker_terms.py`），照原措辭字面讀，M10 就該解除——而**實際擋住 canary 的從來不是費率**。原措辭把費率問題與成交問題寫進了同一句。
 
 ## 8. NT$10,000 資金與風險政策
 
@@ -256,8 +263,10 @@ AI 可以摘要或解釋，但無權：
 
 | 項目 | 狀態 | 阻擋里程碑 | 解決責任 |
 |---|---|---|---|
-| 實際券商及其零股最低費用 | `blocked` | M10 | Product Owner / Execution Owner |
+| 簽署的券商條款 | `blocked` | M10 | Product Owner / Execution Owner |
+| 零股成交證據（會不會成交，非如何計費）| `blocked` | 精確成交與 M10 | Execution Owner |
 | 券商即時或零股行情 | `blocked` | 精確成交與 M10 | Execution Owner |
+| 券商費率、最低費用與零股計費規則 | ~~`blocked`~~ → 已取得 2026-08-25 | 不再阻擋 M10 | — |
 | ETF 是否成為可交易策略 | `assumption` | 新商品契約 | Product Owner |
 | 5%／8% 回撤門檻最佳性 | `assumption` | 不阻擋 M2；M7 重驗 | Risk Owner |
 | MOPS 歷史精確申報時間覆蓋 | `known-limitation` | 部分基本面 formal 特徵 | Data Steward |

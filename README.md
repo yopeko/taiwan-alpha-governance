@@ -98,6 +98,9 @@ AlphaMaster 不得直接寫入正式策略、紙上帳本或真實委託；AI �
 - [候選報告契約](docs/contracts/candidate-report-contract.md)
 - [M6.2 換股可行性：一個在建之前就成立的否定結果](docs/evidence/m6-2-rotation-feasibility-2026-08-26.md)
 - [M6.3 第一個被排序的候選：12-1 動能，否決](docs/evidence/m6-3-first-ranked-candidate-2026-08-26.md)
+- [M3 Owner 決定 D17：M10 阻擋事由改寫與優惠到期處置（m0-v1.2.0）](docs/evidence/m3-owner-decision-d17-2026-08-27.md)
+- [券商條款確認清單](docs/evidence/broker-terms-enquiry-2026-08-27.md)
+- [對照比較契約](docs/contracts/control-comparison-contract.md)
 
 ## 已凍結的 M0 基線
 

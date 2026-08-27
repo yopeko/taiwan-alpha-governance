@@ -236,6 +236,43 @@ class TestM10StaysBlockedAndSaysWhy:
         )
 
 
+class TestTheContractNamesTheRightBlockers:
+    """M0 section 7.2 as of m0-v1.2.0, Owner decision D17.
+
+    Until 2026-08-27 the contract said the canary was blocked until the fee
+    rate, the minimum and the odd-lot billing rules were obtained. All three
+    were obtained on 2026-08-25, so read literally the clause had already
+    released itself -- while the two things actually missing were named
+    nowhere. A blocking condition that declares its own conditions met will
+    eventually be taken at its word.
+    """
+
+    def test_the_contract_no_longer_blocks_on_the_fee_rules(self):
+        contract = (REPO / "docs" / "m0-project-contract.md").read_text(
+            encoding="utf-8"
+        )
+        assert "m0-v1.2.0" in contract
+        assert (
+            "真實 canary 在取得實際券商費率、最低費用及零股計費規則前為 `blocked`"
+            not in contract
+        ), "the superseded wording is back; D17 replaced it for a reason"
+
+    def test_the_two_real_blockers_are_named(self):
+        contract = (REPO / "docs" / "m0-project-contract.md").read_text(
+            encoding="utf-8"
+        )
+        for phrase in ("簽署的券商條款", "零股成交證據"):
+            assert phrase in contract, f"M0 no longer names {phrase} as a blocker"
+
+    def test_the_decision_record_exists(self):
+        """A contract version bump without its decision record is unsourced."""
+
+        record = REPO / "docs" / "evidence" / "m3-owner-decision-d17-2026-08-27.md"
+        assert record.is_file(), f"{record.name} is missing"
+        text = record.read_text(encoding="utf-8")
+        assert "m0-v1.2.0" in text
+
+
 class TestTheseTermsAreNotSilentlyTheDefault:
     def test_the_research_defaults_remain_an_assumption(self):
         """Importing this module must not make anything believe it has terms."""

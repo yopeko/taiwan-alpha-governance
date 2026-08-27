@@ -16,7 +16,7 @@
 | M7 Nested validation | `pending` | - | sealed OOS 未被重複選模、baseline 公平 | 使用 candidate contract。**前置**：候選報告產物規格尚未定義，ADR-0002 剩餘兩條驗證測試因此無法實作 |
 | M8 Governance UI | `pending` | - | formal transition 可稽核，AI 無批准權 | M7 後開始 |
 | M9 Shadow／paper | `pending` | - | 各至少 60 交易日且差異受控 | 無法由歷史回測替代 |
-| M10 NT$10,000 canary | `blocked` | **缺簽署契約**與**零股成交證據**（2026-08-27 收窄）| 對帳、風險、停止及 rollback 完整 | 需人工批准 |
+| M10 NT$10,000 canary | `blocked` | **缺簽署契約**與**零股成交證據**（[D17](evidence/m3-owner-decision-d17-2026-08-27.md)，`m0-v1.2.0`）| 對帳、風險、停止及 rollback 完整 | 需人工批准；待確認項目見[券商條款確認清單](evidence/broker-terms-enquiry-2026-08-27.md) |
 | M11 持續改進 | `pending` | - | 所有變更可重現且無法跳過 promotion gate | Formal 前先建 registry |
 | M12 Broker integration | `blocked` | 尚未選券商 | sandbox -> paper -> canary | 不授權目前開始 |
 
@@ -33,7 +33,7 @@
 - 抓到 764 個交易日的日價不代表這些日期可供回測；缺 market_status 與 security_lifecycle 歷史，仍不足以重建當時的可交易股票池。
 - Owner 批准抓取程式不代表資料已抓到；抓到資料也不代表該日期成為 `supported`，仍須通過完整資料族 coverage 檢查。
 - 2025 年官方交易行事曆已永久無法取得（端點只回傳當年度），該年度改依 TEJ `licensed-vendor-snapshot`，證據等級低於官方。
-- **取得券商費率與零股計費規則不代表 M10 可解除**（2026-08-27）。M10 原記「券商、費率、零股成交證據未定」，其中前兩項在 2026-08-25 已取得：費率為 `publisher-published-rate`，優惠期間與零股計費五題為 `owner-supplied`（見 [D14／D15](evidence/m3-owner-decisions-d14-d15-2026-08-25.md)，條款已落成資料於 `scripts/lib/broker_terms.py`）。剩下的兩項是**簽署契約**與**零股成交證據**——後者問的是一筆零股委託會不會成交，日線答不出來，與計費規則無關。M0 §7.2 的措辭仍寫「取得費率、最低費用及零股計費規則前為 blocked」，**該處措辭的修訂需要 Owner 決定**，本次未動。
+- **取得券商費率與零股計費規則不代表 M10 可解除**（2026-08-27）。M10 原記「券商、費率、零股成交證據未定」，其中前兩項在 2026-08-25 已取得：費率為 `publisher-published-rate`，優惠期間與零股計費五題為 `owner-supplied`（見 [D14／D15](evidence/m3-owner-decisions-d14-d15-2026-08-25.md)，條款已落成資料於 `scripts/lib/broker_terms.py`）。剩下的兩項是**簽署契約**與**零股成交證據**——後者問的是一筆零股委託會不會成交，日線答不出來，與計費規則無關。M0 §7.2 原措辭寫「取得費率、最低費用及零股計費規則前為 blocked」，照字面讀等於已自行解除。**Owner 於同日裁示升版**，措辭改為「取得簽署的券商條款與零股成交證據前為 blocked」（`m0-v1.2.0`，[D17](evidence/m3-owner-decision-d17-2026-08-27.md)），由 `test_the_contract_no_longer_blocks_on_the_fee_rules` 盯著舊措辭不會回來。
 
 ## 變更規則
 

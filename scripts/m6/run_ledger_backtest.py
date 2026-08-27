@@ -87,7 +87,21 @@ MEDIAN_STOP_DISTANCE = Decimal("0.08")
 # What fraction of a session's volume one account may assume it can take.
 # M0 forbids assuming a fill; this is the assumption that replaces "always",
 # and it is deliberately conservative for an account this size.
+#
+# The default, and the axis a sensitivity varies. Changing it asks "what if I
+# could get less of each session" while the tradable universe stays exactly
+# the same -- which is what makes it a sensitivity rather than a second
+# strategy. `--universe` is the other thing, and it is not this.
 PARTICIPATION_RATE = Decimal("0.01")
+
+# The universe a candidate may enter. Not an assumption about fills: it decides
+# which securities can be held at all, so two universes are two candidates.
+#
+# Owner decision 2026-08-27 (option 丙) separated these after `tpex-none` was
+# found to change the held names outright -- the same strategy under two
+# universes returned -37.76% and -3.57% at the reference scale, which is not a
+# sensitivity band, it is two different books.
+UNIVERSES = ("all", "no-tpex-odd-lot-entry")
 
 
 def lot_legs(quantity: int) -> list[int]:
@@ -296,7 +310,8 @@ def run(
     stop_pct: Decimal,
     max_holding_sessions: int,
     ranking_name: str = "",
-    odd_lot_liquidity: str = "published",
+    universe: str = "all",
+    participation_rate: Decimal = PARTICIPATION_RATE,
 ) -> dict[str, Any]:
     sessions, by_session = load_dataset(dataset_root)
     ledger = Ledger(opening_cash=opening_cash, sessions=[date.fromisoformat(s) for s in sessions])
@@ -347,15 +362,19 @@ def run(
         equity.append({"session": session, "nav": float(ledger.mark_session(as_date, marks))})
 
         def conditions(
-            key: tuple[str, str], quantity: int | None = None
+            key: tuple[str, str],
+            quantity: int | None = None,
+            *,
+            entering: bool = False,
         ) -> MarketConditions | None:
             row = rows.get(key)
             if row is None:
                 return None
             volume = row.get("volume")
-            available = int(Decimal(str(volume)) * PARTICIPATION_RATE) if volume else 0
+            available = int(Decimal(str(volume)) * participation_rate) if volume else 0
             if (
-                odd_lot_liquidity == "tpex-none"
+                universe == "no-tpex-odd-lot-entry"
+                and entering
                 and key[0].upper() == TPEX_MARKET
                 and quantity is not None
                 and quantity < BOARD_LOT
@@ -364,8 +383,20 @@ def run(
                 # a share of it borrows liquidity from a session it was not in.
                 # This mode refuses instead, which is the other end of the range
                 # rather than a better answer -- see Owner decision D17.
+                #
+                # Entries only, and that word is the whole correction. Applied
+                # to exits as well, the mode stranded positions: a board lot
+                # bought on TPEx partially fills, the remainder is an odd lot,
+                # and the odd lot can never be sold. The unranked probe filled
+                # all ten slots by March 2019 and never traded again -- eight
+                # completed trades, ten open at the end, 15,019
+                # `exit:no-liquidity-no-fill` refusals, and a reported +38.53%
+                # that was mark-to-market on stock it could not sell.
+                #
+                # An account that cannot get out is not a conservative model of
+                # a thin market, it is a state no market produces.
                 available = 0
-                suppressed["odd-lot-orders-denied-tpex-liquidity"] += 1
+                suppressed["tpex-odd-lot-entries-refused"] += 1
             return MarketConditions(
                 session=as_date,
                 session_is_open=row["session_state"] == "official-open",
@@ -491,7 +522,7 @@ def run(
                 note_refusal(f"entry:{plan.reason}", signal)
                 continue
             order_seq += 1
-            market = conditions(key, plan.quantity)
+            market = conditions(key, plan.quantity, entering=True)
             if market is None:
                 note_refusal("entry:no-market-conditions", signal)
                 continue
@@ -590,8 +621,9 @@ def run(
         "assumptions": {
             "participation_rate": float(PARTICIPATION_RATE),
             "signal_on_close_fill_next_open": True,
-            "odd_lot_liquidity": odd_lot_liquidity,
-            "odd_lot_liquidity_effect": dict(suppressed),
+            "participation_rate": float(participation_rate),
+            "universe": universe,
+            "universe_effect": dict(suppressed),
             "stop_assumed_to_precede_target_within_a_session": True,
         },
         "opening_cash": float(opening_cash),
@@ -806,14 +838,24 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--stop-pct", type=Decimal, default=Decimal("0.08"))
     parser.add_argument("--max-holding-sessions", type=int, default=20)
     parser.add_argument(
-        "--odd-lot-liquidity",
-        choices=("published", "tpex-none"),
-        default="published",
+        "--participation-rate",
+        type=Decimal,
+        default=PARTICIPATION_RATE,
         help=(
-            "how much of a session an odd-lot order may take. `published` "
-            "gives it a share of the published volume, which on TPEx is "
-            "board lots only; `tpex-none` refuses TPEx odd lots outright. "
-            "The two are the ends of a range, not a right and a wrong answer"
+            "fraction of a session's published volume one account may assume "
+            "it can take. The sensitivity axis: the universe is unchanged, "
+            "only how much of it is reachable"
+        ),
+    )
+    parser.add_argument(
+        "--universe",
+        choices=UNIVERSES,
+        default="all",
+        help=(
+            "which securities may be entered. `no-tpex-odd-lot-entry` refuses "
+            "odd-lot entries on TPEx, whose published volume is board lots "
+            "only. That changes the names held, so it is a second candidate "
+            "rather than a second assumption -- see Owner decision, option 丙"
         ),
     )
     parser.add_argument(
@@ -832,7 +874,8 @@ def main(argv: list[str] | None = None) -> int:
         stop_pct=args.stop_pct,
         max_holding_sessions=args.max_holding_sessions,
         ranking_name=args.ranking,
-        odd_lot_liquidity=args.odd_lot_liquidity,
+        universe=args.universe,
+        participation_rate=args.participation_rate,
     )
 
     if args.report_root:
