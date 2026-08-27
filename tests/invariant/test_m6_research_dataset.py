@@ -59,6 +59,11 @@ def manifest():
     return json.loads(path.read_bytes())
 
 
+# 3202 went to full-cash delivery on this date and never came off it. A market
+# fact, so it belongs next to the tests rather than inside one of them.
+FULL_CASH_FROM = "2024-11-19"
+
+
 class TestNothingPricedIsDroppedInSilence:
     """A security the exchange quoted must reach the dataset, or be refused.
 
@@ -135,8 +140,14 @@ class TestNothingPricedIsDroppedInSilence:
             f"6806 is tradable on only {len(eligible)} sessions; it traded "
             "normally for most of the window before delisting"
         )
-        assert eligible[0] == "2025-01-02"
-        assert min(by_state.get("ineligible") or ["9999"]) == "2026-06-23"
+        # Its listing, not the window's first session. Pinned to 2025-01-02
+        # until 2026-08-27, which was true only of the 382-session build and
+        # said nothing about 6806.
+        assert eligible[0] == "2021-11-15"
+        assert not [d for d in eligible if d >= "2026-06-23"], (
+            "6806 delisted on 2026-06-23; no session at or after that date "
+            "may read eligible"
+        )
         assert max(rows)[1] == "ineligible"
 
     def test_a_delisted_security_keeps_its_phases_in_order(self, dataset):
@@ -154,15 +165,23 @@ class TestNothingPricedIsDroppedInSilence:
         """
 
         rows, by_state = self.phases(dataset, "3202", "TPEX")
-        assert not by_state.get("eligible"), (
-            "3202 was on full-cash delivery for every session it traded here; "
-            "eligible would claim it was available on normal terms"
+        eligible = by_state.get("eligible") or []
+        # It traded normally for years before 全額交割. The old assertion said
+        # it never did, which was true only because the 382-session window
+        # started after that date.
+        assert eligible, "3202 traded on normal terms before full-cash delivery"
+        assert max(eligible) == "2024-11-18", (
+            "3202 went to full-cash delivery on 2024-11-19; the last eligible "
+            "session must be the one before it"
+        )
+        assert not [d for d in eligible if d >= FULL_CASH_FROM], (
+            "eligible after full-cash delivery began would claim 3202 was "
+            "available on normal terms when it was not"
         )
         restricted = by_state.get("restricted") or []
-        assert len(restricted) == 57
-        assert restricted[0] == "2025-01-02"
         assert restricted[-1] == "2025-04-02"
         assert min(by_state.get("blocked") or ["9999"]) == "2025-04-07"
+        assert min(by_state.get("ineligible") or ["9999"]) == "2025-07-21"
         assert min(by_state.get("ineligible") or ["9999"]) == "2025-07-21"
         assert max(rows)[1] == "ineligible"
 
@@ -207,7 +226,17 @@ class TestNothingPricedIsDroppedInSilence:
         rows = [i for i, s in enumerate(symbols) if s == "2258"]
         assert rows, "no rows for an innovation-board security at all"
         assert all(states[i] == "ineligible" for i in rows)
-        assert all("out-of-scope-innovation-board" in (reasons[i] or "") for i in rows)
+        # Only once it is on the board. Before it listed the honest reason is
+        # `not-yet-on-any-board`, and requiring the innovation-board code for
+        # every session -- as this did until 2026-08-27 -- demanded a reason
+        # that would have been false for 1,186 of them.
+        on_board = [
+            i for i in rows if "not-yet-on-any-board" not in (reasons[i] or "")
+        ]
+        assert on_board, "2258 never reaches the board in this window"
+        assert all(
+            "out-of-scope-innovation-board" in (reasons[i] or "") for i in on_board
+        )
 
     def test_no_ordinary_share_is_mistaken_for_the_innovation_board(self, dataset):
         """群創 and 緯創 end in 創 without being on it.
@@ -340,16 +369,24 @@ class TestTheDatasetIsReproducible:
         assert manifest["sha256"] == hashlib.sha256(path.read_bytes()).hexdigest()
 
     def test_it_covers_the_whole_m3_window(self, manifest):
-        assert manifest["sessions"] == 382
-        assert manifest["window"]["start"] == "2025-01-02"
+        """382 sessions until the six-year rebuild landed on 2026-08-25.
+
+        Pinned rather than derived on purpose: this is the test that notices
+        the dataset silently changing size. It stayed at 382 for two days
+        after the rebuild because nothing pointed it at the new build.
+        """
+
+        assert manifest["sessions"] == 1840
+        assert manifest["window"]["start"] == "2019-01-02"
         assert manifest["window"]["end"] == "2026-08-03"
 
     def test_the_warmup_limit_is_stated_rather_than_left_to_be_discovered(self, manifest):
-        """382 sessions minus a 250-session warmup leaves 132 usable ones.
+        """1,840 sessions minus a 250-session warmup leaves about 1,590.
 
-        A strategy needing a 52-week high has about six months of signal window
-        here, which is not enough to conclude anything. The dataset says so
-        rather than letting a reader assume the window is the sample.
+        The 382-session build left 132, which was not enough to conclude
+        anything and was the stated reason M6 could not produce a strategy
+        result. The rebuild removed that limit; the note stays required,
+        because a reader must not have to assume the window is the sample.
         """
 
         assert any("warmup" in note.lower() for note in manifest["notes"])

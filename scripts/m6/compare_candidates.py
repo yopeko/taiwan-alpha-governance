@@ -63,8 +63,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from m5.ledger import POLICY_INITIAL_CAPITAL  # noqa: E402
 
-SCHEMA_ID = "tw-alpha-m6-control-comparison/1.0.0"
-CONTRACT_VERSION = "control-comparison-v1.0.0"
+# Both bumped with the columns. 1.0.0 carried `odd_lot_liquidity`; 1.1.0
+# replaced it with `participation_rate` and a per-candidate `universe`.
+#
+# Declared stale once already, on the candidate report, and caught only
+# because a test compared the producer's string against the document. The
+# same test now covers this pair.
+SCHEMA_ID = "tw-alpha-m6-control-comparison/1.1.0"
+CONTRACT_VERSION = "control-comparison-v1.1.0"
 
 SCALES = ("m0-execution", "reference-measurement")
 

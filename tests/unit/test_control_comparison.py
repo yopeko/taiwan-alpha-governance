@@ -271,6 +271,32 @@ class TestTheContractDocumentSaysWhatTheCodeDoes:
         assert "no-tpex-odd-lot-entry" in contract
         assert "屬於候選定義" in contract
 
+    def test_the_producer_declares_the_version_the_contract_carries(self):
+        """The third time this pair has been found disagreeing.
+
+        The candidate report producer said v1.0.0 while its document had moved
+        to v1.1.0, and this producer was written with the same defect on the
+        same day the first one was fixed. A version string nobody compares is
+        a claim nobody checks.
+        """
+
+        import re
+
+        contract = (
+            REPO / "docs" / "contracts" / "control-comparison-contract.md"
+        ).read_text(encoding="utf-8")
+        declared = (REPO / "scripts" / "m6" / "compare_candidates.py").read_text(
+            encoding="utf-8"
+        )
+        version = re.search(
+            r'CONTRACT_VERSION = "(control-comparison-v[0-9.]+)"', declared
+        )
+        assert version, "the producer no longer declares a contract version"
+        assert version.group(1) in contract, (
+            f"the producer declares {version.group(1)}, which the contract "
+            "document does not mention"
+        )
+
     def test_the_driver_and_the_contract_agree_on_the_universes(self):
         """Two copies of an enumeration must move together."""
 

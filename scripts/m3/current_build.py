@@ -38,13 +38,17 @@ WAREHOUSE_ROOTS = {
     "market status and fundamentals": STATUS,
 }
 
-# Not rebuilt for the six-year window. M6 has not been re-run, so this dataset
-# and the warehouse it was derived from are a matched pair; pointing its tests
-# at the new prices table would compare 382 sessions against 1,840 and read
-# the difference as a defect.
-RESEARCH_DATASET = SCRATCH / "tw-alpha-m6-dataset-08"
-RESEARCH_DATASET_GENERATION = "2026-08-20 382-session build, not yet rebuilt"
-RESEARCH_DATASET_PRICES = SCRATCH / "tw-alpha-m3-pit-prices-09"
+# The six-year build, and the warehouse it came from. Its own manifest names
+# that warehouse, so this pair is checked rather than asserted.
+#
+# Pointed at the 382-session dataset-08 until 2026-08-27, with a comment
+# saying M6 had not been re-run. M6 was re-run on 2026-08-25 and every
+# candidate report since has used dataset-09, so the invariant tests were
+# validating a dataset nothing else touched -- the same shape this file was
+# created to stop, one generation later.
+RESEARCH_DATASET = SCRATCH / "tw-alpha-m6-dataset-09"
+RESEARCH_DATASET_GENERATION = "2026-08-25 six-year build, 1,840 sessions"
+RESEARCH_DATASET_PRICES = SCRATCH / "tw-alpha-m3-pit-prices-12"
 
 # The candidate report the ADR-0002 contract tests read. Named here for the
 # same reason as everything else in this file: five test files once each
