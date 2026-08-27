@@ -68,6 +68,10 @@ from m5.ledger import (  # noqa: E402
 )
 
 SCHEMA_ID = "tw-alpha-m6-ledger-backtest/1.0.0"
+
+# As the dataset spells it. Compared case-insensitively at the call site, but
+# named here so the value has one home rather than being retyped per branch.
+TPEX_MARKET = "TPEX"
 # Bumped with the columns, not with the code. 1.0.0 through 2026-08-26, then
 # 1.2.0 when `rank_consistency_violations` was replaced by the scarcity and
 # sizing pair -- a reader matching an old report against this schema would
@@ -292,6 +296,7 @@ def run(
     stop_pct: Decimal,
     max_holding_sessions: int,
     ranking_name: str = "",
+    odd_lot_liquidity: str = "published",
 ) -> dict[str, Any]:
     sessions, by_session = load_dataset(dataset_root)
     ledger = Ledger(opening_cash=opening_cash, sessions=[date.fromisoformat(s) for s in sessions])
@@ -310,6 +315,11 @@ def run(
         history_depth = max(history_depth, MOMENTUM_LOOKBACK_SESSIONS + 2)
     # Sessions where a candidate refused for capacity outscored one that was
     # opened. Zero is the claim that fills followed the ranking.
+    # What the odd-lot liquidity mode actually did. Counted because the first
+    # version compared against "TPEx" while the dataset says "TPEX", so the
+    # mode ran over 1,840 sessions and changed nothing -- and reported the same
+    # figures as the default, which read as "the assumption does not matter".
+    suppressed: dict[str, int] = defaultdict(int)
     scarcity_violations = 0
     sizing_violations = 0
     violation_codes: dict[str, int] = defaultdict(int)
@@ -336,20 +346,33 @@ def run(
                     marks[position.symbol] = position.entry_price
         equity.append({"session": session, "nav": float(ledger.mark_session(as_date, marks))})
 
-        def conditions(key: tuple[str, str]) -> MarketConditions | None:
+        def conditions(
+            key: tuple[str, str], quantity: int | None = None
+        ) -> MarketConditions | None:
             row = rows.get(key)
             if row is None:
                 return None
             volume = row.get("volume")
+            available = int(Decimal(str(volume)) * PARTICIPATION_RATE) if volume else 0
+            if (
+                odd_lot_liquidity == "tpex-none"
+                and key[0].upper() == TPEX_MARKET
+                and quantity is not None
+                and quantity < BOARD_LOT
+            ):
+                # TPEx publishes board-lot volume only. Letting an odd lot take
+                # a share of it borrows liquidity from a session it was not in.
+                # This mode refuses instead, which is the other end of the range
+                # rather than a better answer -- see Owner decision D17.
+                available = 0
+                suppressed["odd-lot-orders-denied-tpex-liquidity"] += 1
             return MarketConditions(
                 session=as_date,
                 session_is_open=row["session_state"] == "official-open",
                 tradability_state=row["tradability_state"],
                 limit_up=Decimal(str(row["limit_up"])) if row["limit_up"] is not None else None,
                 limit_down=Decimal(str(row["limit_down"])) if row["limit_down"] is not None else None,
-                available_quantity=(
-                    int(Decimal(str(volume)) * PARTICIPATION_RATE) if volume else 0
-                ),
+                available_quantity=available,
             )
 
         # --- exits first -------------------------------------------------
@@ -371,10 +394,11 @@ def run(
                 reason, price = "max-holding", close
             if reason is None:
                 continue
-            market = conditions(key)
-            if market is None:
-                continue
-            for leg in lot_legs(position.quantity):
+            legs = lot_legs(position.quantity)
+            for leg in legs:
+                market = conditions(key, leg)
+                if market is None:
+                    continue
                 order_seq += 1
                 result = ledger.execute(
                     OrderRequest(
@@ -467,7 +491,7 @@ def run(
                 note_refusal(f"entry:{plan.reason}", signal)
                 continue
             order_seq += 1
-            market = conditions(key)
+            market = conditions(key, plan.quantity)
             if market is None:
                 note_refusal("entry:no-market-conditions", signal)
                 continue
@@ -566,6 +590,8 @@ def run(
         "assumptions": {
             "participation_rate": float(PARTICIPATION_RATE),
             "signal_on_close_fill_next_open": True,
+            "odd_lot_liquidity": odd_lot_liquidity,
+            "odd_lot_liquidity_effect": dict(suppressed),
             "stop_assumed_to_precede_target_within_a_session": True,
         },
         "opening_cash": float(opening_cash),
@@ -780,6 +806,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--stop-pct", type=Decimal, default=Decimal("0.08"))
     parser.add_argument("--max-holding-sessions", type=int, default=20)
     parser.add_argument(
+        "--odd-lot-liquidity",
+        choices=("published", "tpex-none"),
+        default="published",
+        help=(
+            "how much of a session an odd-lot order may take. `published` "
+            "gives it a share of the published volume, which on TPEx is "
+            "board lots only; `tpex-none` refuses TPEx odd lots outright. "
+            "The two are the ends of a range, not a right and a wrong answer"
+        ),
+    )
+    parser.add_argument(
         "--ranking",
         choices=sorted(RANKINGS),
         default="",
@@ -795,6 +832,7 @@ def main(argv: list[str] | None = None) -> int:
         stop_pct=args.stop_pct,
         max_holding_sessions=args.max_holding_sessions,
         ranking_name=args.ranking,
+        odd_lot_liquidity=args.odd_lot_liquidity,
     )
 
     if args.report_root:
