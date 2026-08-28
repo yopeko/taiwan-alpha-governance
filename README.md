@@ -118,6 +118,7 @@ AlphaMaster 不得直接寫入正式策略、紙上帳本或真實委託；AI �
 - [排名品質量測 001：動能的排序能力與零無法區分](docs/evidence/rank-quality-001-2026-08-28.md)
 - [候選計畫 004：把停損從常數改成波動的函數](docs/evidence/m7-candidate-plan-004-2026-08-28.md)
 - [候選計畫 004b：拿掉我自己加的兩個夾子](docs/evidence/m7-candidate-plan-004b-2026-08-28.md)
+- [候選 004b 結果：誰都沒有通過，而計畫要求的那一欄把比較本身推翻了](docs/evidence/m7-candidate-004b-result-2026-08-28.md)
 
 ## 已凍結的 M0 基線
 
