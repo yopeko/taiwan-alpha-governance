@@ -357,6 +357,68 @@ def breakout_signals(
     return signals
 
 
+# Rebalance cadence for the rank-only entry, in sessions. 21 is the
+# conventional monthly session count, the same conversion the 12-1 momentum
+# lookback already makes. Not searched over: one cadence, declared here.
+REBALANCE_SESSIONS = 21
+
+ENTRY_RULES = ("breakout", "rank-only")
+
+
+def rank_only_signals(
+    history: dict[tuple[str, str], list[dict]],
+    session: str,
+    *,
+    stop_pct: Decimal,
+    ranking: Any,
+) -> list[Signal]:
+    """Every scoreable security, ranked. No entry condition at all.
+
+    This is the original shape of the momentum literature: rank by the score,
+    hold the top N, rebalance on a cadence. What this project had been running
+    was "break out, *then* rank by the score", which is a composite it built
+    itself.
+
+    The composite is why "does the ranking help" could not be answered. The
+    ranking only ever reordered signals that had already passed a breakout
+    filter, and M6.2 measured that filter turning over 8.72 names a session.
+    Remove the filter and the ranking is measurable on its own.
+
+    Requires a ranking. Without one this would be "hold an arbitrary ten
+    securities", which is not a candidate, and returning an empty list would
+    let that read as a strategy that found nothing.
+    """
+
+    if ranking is None:
+        raise ValueError(
+            "rank-only entry needs a ranking function; without one it holds an "
+            "arbitrary ten securities and reports that as a result"
+        )
+
+    signals: list[Signal] = []
+    for key, bars in history.items():
+        today = bars[-1]
+        if today["session_date"] != session or today["close"] is None:
+            continue
+        closes = [b["close"] for b in bars]
+        if any(c is None for c in closes):
+            continue
+        score = ranking(closes, len(bars) - 1)
+        if score is None:
+            continue
+        close = Decimal(str(today["close"]))
+        signals.append(
+            Signal(
+                market=key[0],
+                symbol=key[1],
+                stop_price=close * (Decimal("1") - stop_pct),
+                score=score,
+            )
+        )
+    signals.sort(key=lambda s: s.score, reverse=True)
+    return signals
+
+
 def run(
     dataset_root: Path,
     *,
@@ -368,6 +430,7 @@ def run(
     universe: str = "all",
     participation_rate: Decimal = PARTICIPATION_RATE,
     first_trading_session: str | None = None,
+    entry_rule: str = "breakout",
 ) -> dict[str, Any]:
     sessions, by_session = load_dataset(dataset_root)
     ledger = Ledger(opening_cash=opening_cash, sessions=[date.fromisoformat(s) for s in sessions])
@@ -464,6 +527,13 @@ def run(
                 available_quantity=available,
             )
 
+        # What yesterday's close ranked, arriving today. For the rank-only
+        # rule `pending` is non-empty only on the session after a rebalance,
+        # so its presence *is* the rebalance flag -- no second calendar to
+        # drift out of step with the first.
+        is_rebalance = entry_rule == "rank-only" and bool(pending)
+        target_set = {(s.market, s.symbol) for s in pending}
+
         # --- exits first -------------------------------------------------
         for key in list(positions):
             position = positions[key]
@@ -479,6 +549,12 @@ def run(
                 # profitable level, the stop is assumed to come first. Daily
                 # bars cannot say which did, and this errs against the account.
                 reason, price = "stop", position.stop_price
+            elif entry_rule == "rank-only":
+                # Held until it leaves the top N on a rebalance, not until it
+                # gets old. A holding period is a parameter; membership of the
+                # top N is the strategy restating itself.
+                if is_rebalance and key not in target_set:
+                    reason, price = "left-the-top-n", close
             elif age >= max_holding_sessions:
                 reason, price = "max-holding", close
             if reason is None:
@@ -641,17 +717,34 @@ def run(
                 history[key].append(row)
                 if len(history[key]) > history_depth:
                     history[key].pop(0)
-        pending = [
-            s
-            for s in breakout_signals(
-                history,
-                session,
-                lookback=lookback,
-                stop_pct=stop_pct,
-                ranking=ranking,
-            )
-            if rows[(s.market, s.symbol)]["tradability_state"] == TRADABLE_STATE
-        ]
+        if entry_rule == "rank-only":
+            # Only on a rebalance session, and only the top N. Every other
+            # session the book is left alone, which is the whole point: the
+            # breakout rule reshuffled it daily.
+            if (index + 1) % REBALANCE_SESSIONS == 0:
+                ranked = rank_only_signals(
+                    history, session, stop_pct=stop_pct, ranking=ranking
+                )
+                pending = [
+                    s
+                    for s in ranked
+                    if rows[(s.market, s.symbol)]["tradability_state"]
+                    == TRADABLE_STATE
+                ][:POLICY_MAX_POSITIONS]
+            else:
+                pending = []
+        else:
+            pending = [
+                s
+                for s in breakout_signals(
+                    history,
+                    session,
+                    lookback=lookback,
+                    stop_pct=stop_pct,
+                    ranking=ranking,
+                )
+                if rows[(s.market, s.symbol)]["tradability_state"] == TRADABLE_STATE
+            ]
 
     final_nav = float(ledger.nav(marks)) if equity else float(opening_cash)
     manifest = {
@@ -662,7 +755,15 @@ def run(
             (dataset_root / "dataset_manifest.json").read_bytes()
         )["sha256"],
         "strategy": {
-            "name": "close-above-n-session-high",
+            "name": (
+                "close-above-n-session-high"
+                if entry_rule == "breakout"
+                else "hold-top-n-by-score"
+            ),
+            "entry_rule": entry_rule,
+            "rebalance_sessions": (
+                REBALANCE_SESSIONS if entry_rule == "rank-only" else None
+            ),
             # True of the unranked form, and it stayed in the manifest after a
             # ranking made it a candidate. Derived now instead of asserted.
             "note": (
@@ -906,6 +1007,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--stop-pct", type=Decimal, default=Decimal("0.08"))
     parser.add_argument("--max-holding-sessions", type=int, default=20)
     parser.add_argument(
+        "--entry",
+        choices=ENTRY_RULES,
+        default="breakout",
+        help=(
+            "`breakout` is the probe every candidate so far has used without "
+            "it ever being argued for. `rank-only` removes it: hold the top N "
+            "by score, rebalanced monthly, which is the original shape of the "
+            "momentum literature and the only one where the ranking can be "
+            "measured on its own"
+        ),
+    )
+    parser.add_argument(
         "--participation-rate",
         type=Decimal,
         default=PARTICIPATION_RATE,
@@ -953,6 +1066,7 @@ def main(argv: list[str] | None = None) -> int:
         universe=args.universe,
         participation_rate=args.participation_rate,
         first_trading_session=args.first_trading_session,
+        entry_rule=args.entry,
     )
 
     if args.report_root:

@@ -112,6 +112,7 @@ AlphaMaster 不得直接寫入正式策略、紙上帳本或真實委託；AI �
 - [比較計畫 001：12-1 動能 對 60 日低波動](docs/evidence/m7-comparison-plan-001-2026-08-28.md)
 - [比較 001 結果：兩個候選誰都沒有勝出](docs/evidence/m7-comparison-001-result-2026-08-28.md)
 - [M3 Owner 決定 D18：M6.1 依 D9 結案、M10 阻擋改為可取得的證據（m0-v1.3.0）](docs/evidence/m3-owner-decision-d18-2026-08-28.md)
+- [候選計畫 003：拿掉突破，讓排序第一次獨立被量](docs/evidence/m7-candidate-plan-003-2026-08-28.md)
 
 ## 已凍結的 M0 基線
 
