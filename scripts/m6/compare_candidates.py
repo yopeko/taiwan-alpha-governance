@@ -51,6 +51,7 @@ import pyarrow.parquet as pq
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from run_ledger_backtest import (  # noqa: E402
+    ENTRY_RULES,
     UNIVERSES,
     BrokerTerms,
     RANKINGS,
@@ -189,6 +190,7 @@ def compare(
                     max_holding_sessions=max_holding_sessions,
                     ranking_name=spec["ranking"],
                     universe=spec["universe"],
+                    entry_rule=spec["entry"],
                     participation_rate=rate,
                 )
 
@@ -239,6 +241,7 @@ def compare(
                         "candidate": name,
                         "ranking_function": spec["ranking"],
                         "universe": spec["universe"],
+                        "entry_rule": spec["entry"],
                         "scale": scale,
                         "participation_rate": float(rate),
                         "common_window_start": start,
@@ -292,15 +295,31 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--ranking-b", choices=sorted(RANKINGS), default="")
     parser.add_argument("--universe-a", choices=UNIVERSES, default="all")
     parser.add_argument("--universe-b", choices=UNIVERSES, default="all")
+    parser.add_argument("--entry-a", choices=ENTRY_RULES, default="breakout")
+    parser.add_argument("--entry-b", choices=ENTRY_RULES, default="breakout")
     parser.add_argument("--lookback", type=int, default=20)
     parser.add_argument("--stop-pct", type=Decimal, default=Decimal("0.08"))
     parser.add_argument("--max-holding-sessions", type=int, default=20)
     args = parser.parse_args(argv)
 
     candidates = {
-        "a": {"ranking": args.ranking_a, "universe": args.universe_a},
-        "b": {"ranking": args.ranking_b, "universe": args.universe_b},
+        "a": {
+            "ranking": args.ranking_a,
+            "universe": args.universe_a,
+            "entry": args.entry_a,
+        },
+        "b": {
+            "ranking": args.ranking_b,
+            "universe": args.universe_b,
+            "entry": args.entry_b,
+        },
     }
+    if candidates["a"] == candidates["b"]:
+        raise SystemExit(
+            "both candidates are identical, so this would compare one against "
+            "itself and spend a trial on a tautology. Vary --ranking, "
+            "--universe or --entry"
+        )
     rows, manifest = compare(
         args.dataset,
         candidates,
@@ -332,7 +351,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(
                     f"    {row['candidate']} "
                     f"{row['ranking_function'] or '(無排序)':<16}"
-                    f"{row['universe']:<22}"
+                    f"{row['entry_rule']:<12}"
                     f" 報酬 {row['return_pct_in_window']:>8.2f}%"
                     f"  回撤 {row['drawdown_pct_in_window']:>6.2f}%"
                     f"  成交 {row['completed_trades_in_window']:>5}"

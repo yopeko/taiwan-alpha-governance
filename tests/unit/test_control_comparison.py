@@ -240,6 +240,45 @@ class TestItRefusesRatherThanGuessing:
             window_metrics(result, "2020-01-16", "2020-06-30")
 
 
+class TestItRefusesAComparisonThatCannotSayAnything:
+    def test_two_identical_candidates_are_refused(self):
+        """Found by running it: the first rank-only comparison was launched
+        with both sides set to the same candidate, because the comparator had
+        no way to express an entry-rule difference and silently accepted the
+        pair anyway.
+
+        Eight backtests would have produced two rows agreeing perfectly and
+        spent a trial on a tautology.
+        """
+
+        sys.path.insert(0, str(REPO / "scripts" / "m6"))
+        import compare_candidates
+
+        with pytest.raises(SystemExit) as caught:
+            compare_candidates.main(
+                [
+                    "--dataset",
+                    "nowhere",
+                    "--out",
+                    "nowhere",
+                    "--ranking-a",
+                    "momentum-12-1",
+                    "--ranking-b",
+                    "momentum-12-1",
+                ]
+            )
+        assert "identical" in str(caught.value)
+
+    def test_the_entry_rule_makes_two_candidates_different(self):
+        """The axis that was missing. Same ranking, different entry, is the
+        comparison candidate plan 003 exists to run."""
+
+        sys.path.insert(0, str(REPO / "scripts" / "m6"))
+        from run_ledger_backtest import ENTRY_RULES
+
+        assert set(ENTRY_RULES) == {"breakout", "rank-only"}
+
+
 class TestTheContractDocumentSaysWhatTheCodeDoes:
     def test_the_contract_records_the_option_that_was_chosen(self):
         contract = (
