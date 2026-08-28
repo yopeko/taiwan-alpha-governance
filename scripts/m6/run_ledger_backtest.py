@@ -241,15 +241,11 @@ def momentum_12_1(closes: list[float], i: int) -> float | None:
 VOLATILITY_LOOKBACK_SESSIONS = 60
 
 
-def inverse_volatility_60(closes: list[float], i: int) -> float | None:
-    """Negative realised volatility of daily returns over 60 sessions.
+def realised_volatility(closes: list[float], i: int) -> float | None:
+    """Standard deviation of daily returns over the last 60 sessions.
 
-    Negated so that higher scores sort first under the same descending rule
-    every ranking uses, rather than each ranking carrying its own direction.
-
-    None where the history is short or a price is non-positive: a score that
-    cannot be computed must not quietly become zero, which would sort a name
-    into the middle of the book instead of out of it.
+    None where the history is short or a price is non-positive: a value that
+    cannot be computed must not quietly become zero.
     """
 
     if i < VOLATILITY_LOOKBACK_SESSIONS:
@@ -268,7 +264,88 @@ def inverse_volatility_60(closes: list[float], i: int) -> float | None:
         # A price that never moved for sixty sessions is not the calmest
         # security in the market, it is one that was not trading.
         return None
-    return -(variance ** 0.5)
+    return variance ** 0.5
+
+
+def inverse_volatility_60(closes: list[float], i: int) -> float | None:
+    """Negative realised volatility, so the quietest name scores highest.
+
+    Negated so that higher scores sort first under the same descending rule
+    every ranking uses, rather than each ranking carrying its own direction.
+    """
+
+    vol = realised_volatility(closes, i)
+    return None if vol is None else -vol
+
+
+# Stop distance: a constant, or a multiple of the security's own volatility.
+#
+# `fixed` is what every candidate through trial 12 used, and it was never
+# argued for. It also has a consequence nobody chose: `plan_position` sizes by
+# risk, so with a constant stop the position value is
+#
+#     quantity x price = (planned risk / stop distance) x NAV
+#
+# which is 9.375% of NAV for every security regardless of price. **Equal risk
+# degenerates into equal weight, and the constant is why.**
+#
+# `volatility` removes the constant and the existing risk policy then produces
+# volatility-scaled sizes on its own: a 4% stop takes 18.7% of NAV, a 16% stop
+# takes 4.7%. No new weighting logic -- the mechanism was already there, held
+# flat by a constant.
+#
+# Barroso & Santa-Clara (2015) and Daniel & Moskowitz (2016) on
+# volatility-managed momentum; Baz et al. standardise MACD by 63-day
+# volatility for the same reason.
+STOP_RULES = ("fixed", "volatility")
+
+# Two standard deviations, scaled from daily to the 21-session holding period.
+# The square-root scaling is the standard conversion, not a choice. The
+# multiplier of 2 is a choice, and the only free parameter this rule adds:
+# taken because it is conventional, not because it tested better -- nothing
+# was run before candidate plan 004 was committed.
+STOP_VOL_MULTIPLIER = Decimal("2")
+STOP_HORIZON_SESSIONS = 21
+
+# Unclamped, and the clamp that was here first is the reason this comment
+# exists. Candidate plan 004 specified a 4%-16% floor and ceiling "to prevent
+# degeneracy" and justified them by saying both ends sat inside caps the
+# contracts already impose -- which is the argument for not having them.
+#
+# Measured before running anything: on the development segment the median
+# unclamped distance is 18.51%, so **59.3% of securities clamped at the 16%
+# ceiling**. For most of the book the rule was a constant, just a different
+# one from 8%, and momentum favours volatile names so the selected ten would
+# have clamped almost entirely. The result would have measured halved gross
+# exposure rather than volatility scaling.
+#
+# Removing both bounds takes the free parameters from two to zero, and the
+# existing gates still catch the extremes -- checked rather than assumed, and
+# the check corrected which gate does it:
+#
+#     stop 0.01%  ->  refused, round-trip-cost-exceeds-planned-risk
+#     stop 1%     ->  33.40% of NAV, inside every cap
+#     stop 6.27%  ->  11.96%   (P05 of the measured distribution)
+#     stop 18.51% ->   4.04%   (median)
+#     stop 41.19% ->   1.80%   (P95)
+#
+# The quiet end is caught by the **cost gate**, not the 45% weight cap as
+# first written: a position whose entire risk budget is smaller than its round
+# trip is refused for that reason, which is the right reason. Nothing at the
+# loud end needs catching -- it just gets small.
+def stop_distance(
+    closes: list[float], i: int, rule: str, fixed_pct: Decimal
+) -> Decimal | None:
+    """How far below entry the stop sits, as a fraction of price."""
+
+    if rule == "fixed":
+        return fixed_pct
+    vol = realised_volatility(closes, i)
+    if vol is None:
+        return None
+    return STOP_VOL_MULTIPLIER * Decimal(str(vol)) * Decimal(
+        str(STOP_HORIZON_SESSIONS)
+    ).sqrt()
 
 
 RANKINGS: dict[str, Any] = {
@@ -311,6 +388,7 @@ def breakout_signals(
     lookback: int,
     stop_pct: Decimal,
     ranking: Any = None,
+    stop_rule: str = "fixed",
 ) -> list[Signal]:
     """Close above the highest close of the previous `lookback` sessions.
 
@@ -332,6 +410,12 @@ def breakout_signals(
         close = Decimal(str(today["close"]))
         if close <= Decimal(str(max(window))):
             continue
+        closes_all = [b["close"] for b in bars]
+        if any(c is None for c in closes_all):
+            continue
+        distance = stop_distance(closes_all, len(bars) - 1, stop_rule, stop_pct)
+        if distance is None:
+            continue
         score = None
         if ranking is not None:
             closes = [b["close"] for b in bars]
@@ -346,7 +430,7 @@ def breakout_signals(
             Signal(
                 key[0],
                 key[1],
-                stop_price=close * (Decimal("1") - stop_pct),
+                stop_price=close * (Decimal("1") - distance),
                 score=score,
             )
         )
@@ -371,6 +455,7 @@ def rank_only_signals(
     *,
     stop_pct: Decimal,
     ranking: Any,
+    stop_rule: str = "fixed",
 ) -> list[Signal]:
     """Every scoreable security, ranked. No entry condition at all.
 
@@ -406,12 +491,17 @@ def rank_only_signals(
         score = ranking(closes, len(bars) - 1)
         if score is None:
             continue
+        distance = stop_distance(closes, len(bars) - 1, stop_rule, stop_pct)
+        if distance is None:
+            # No stop means no size, and sizing a position without one would
+            # be the only place in this driver where risk is not quantified.
+            continue
         close = Decimal(str(today["close"]))
         signals.append(
             Signal(
                 market=key[0],
                 symbol=key[1],
-                stop_price=close * (Decimal("1") - stop_pct),
+                stop_price=close * (Decimal("1") - distance),
                 score=score,
             )
         )
@@ -431,6 +521,7 @@ def run(
     participation_rate: Decimal = PARTICIPATION_RATE,
     first_trading_session: str | None = None,
     entry_rule: str = "breakout",
+    stop_rule: str = "fixed",
 ) -> dict[str, Any]:
     sessions, by_session = load_dataset(dataset_root)
     ledger = Ledger(opening_cash=opening_cash, sessions=[date.fromisoformat(s) for s in sessions])
@@ -723,7 +814,11 @@ def run(
             # breakout rule reshuffled it daily.
             if (index + 1) % REBALANCE_SESSIONS == 0:
                 ranked = rank_only_signals(
-                    history, session, stop_pct=stop_pct, ranking=ranking
+                    history,
+                    session,
+                    stop_pct=stop_pct,
+                    ranking=ranking,
+                    stop_rule=stop_rule,
                 )
                 pending = [
                     s
@@ -742,6 +837,7 @@ def run(
                     lookback=lookback,
                     stop_pct=stop_pct,
                     ranking=ranking,
+                    stop_rule=stop_rule,
                 )
                 if rows[(s.market, s.symbol)]["tradability_state"] == TRADABLE_STATE
             ]
@@ -761,6 +857,7 @@ def run(
                 else "hold-top-n-by-score"
             ),
             "entry_rule": entry_rule,
+            "stop_rule": stop_rule,
             "rebalance_sessions": (
                 REBALANCE_SESSIONS if entry_rule == "rank-only" else None
             ),
@@ -1007,6 +1104,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--stop-pct", type=Decimal, default=Decimal("0.08"))
     parser.add_argument("--max-holding-sessions", type=int, default=20)
     parser.add_argument(
+        "--stop-rule",
+        choices=STOP_RULES,
+        default="fixed",
+        help=(
+            "`fixed` is the constant every candidate through trial 13 used. "
+            "It also makes equal-risk sizing degenerate into equal weight, "
+            "because position value is (planned risk / stop distance) x NAV. "
+            "`volatility` removes the constant and the existing risk policy "
+            "then scales size by volatility on its own"
+        ),
+    )
+    parser.add_argument(
         "--entry",
         choices=ENTRY_RULES,
         default="breakout",
@@ -1067,6 +1176,7 @@ def main(argv: list[str] | None = None) -> int:
         participation_rate=args.participation_rate,
         first_trading_session=args.first_trading_session,
         entry_rule=args.entry,
+        stop_rule=args.stop_rule,
     )
 
     if args.report_root:

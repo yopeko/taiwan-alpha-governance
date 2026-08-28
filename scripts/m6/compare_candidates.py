@@ -52,6 +52,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from run_ledger_backtest import (  # noqa: E402
     ENTRY_RULES,
+    STOP_RULES,
     UNIVERSES,
     BrokerTerms,
     RANKINGS,
@@ -191,6 +192,7 @@ def compare(
                     ranking_name=spec["ranking"],
                     universe=spec["universe"],
                     entry_rule=spec["entry"],
+                    stop_rule=spec["stop"],
                     participation_rate=rate,
                 )
 
@@ -242,6 +244,7 @@ def compare(
                         "ranking_function": spec["ranking"],
                         "universe": spec["universe"],
                         "entry_rule": spec["entry"],
+                        "stop_rule": spec["stop"],
                         "scale": scale,
                         "participation_rate": float(rate),
                         "common_window_start": start,
@@ -297,6 +300,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--universe-b", choices=UNIVERSES, default="all")
     parser.add_argument("--entry-a", choices=ENTRY_RULES, default="breakout")
     parser.add_argument("--entry-b", choices=ENTRY_RULES, default="breakout")
+    parser.add_argument("--stop-rule-a", choices=STOP_RULES, default="fixed")
+    parser.add_argument("--stop-rule-b", choices=STOP_RULES, default="fixed")
     parser.add_argument("--lookback", type=int, default=20)
     parser.add_argument("--stop-pct", type=Decimal, default=Decimal("0.08"))
     parser.add_argument("--max-holding-sessions", type=int, default=20)
@@ -307,11 +312,13 @@ def main(argv: list[str] | None = None) -> int:
             "ranking": args.ranking_a,
             "universe": args.universe_a,
             "entry": args.entry_a,
+            "stop": args.stop_rule_a,
         },
         "b": {
             "ranking": args.ranking_b,
             "universe": args.universe_b,
             "entry": args.entry_b,
+            "stop": args.stop_rule_b,
         },
     }
     if candidates["a"] == candidates["b"]:
@@ -351,7 +358,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(
                     f"    {row['candidate']} "
                     f"{row['ranking_function'] or '(無排序)':<16}"
-                    f"{row['entry_rule']:<12}"
+                    f"{row['stop_rule']:<12}"
                     f" 報酬 {row['return_pct_in_window']:>8.2f}%"
                     f"  回撤 {row['drawdown_pct_in_window']:>6.2f}%"
                     f"  成交 {row['completed_trades_in_window']:>5}"
