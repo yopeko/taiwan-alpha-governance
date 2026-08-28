@@ -217,9 +217,64 @@ def momentum_12_1(closes: list[float], i: int) -> float | None:
     return end / start - 1
 
 
+# Low volatility: rank by the inverse of trailing realised volatility, so the
+# quietest name scores highest. Black (1972), Haugen & Heins (1975), and
+# Frazzini & Pedersen (2014) on betting against beta -- decades old, other
+# markets, and nothing about Taiwan 2019-2026 went into it.
+#
+# Chosen as the second candidate for two reasons beyond being a prior.
+#
+# It measures something 12-1 momentum does not. Momentum ranks by how much a
+# price moved; this ranks by how steadily. Two candidates that rank on
+# variants of past return would mostly be one candidate tested twice.
+#
+# It needs 60 sessions of warmup rather than 252. The first control comparison
+# had a common window of 1,584 sessions at the reference scale and only 37 at
+# the m0 scale, because the momentum candidate could not trade for its first
+# year. A shorter warmup is not a better idea, but it does make the comparison
+# cover more of the window, and the window is not something to spend lightly.
+#
+# What this is not: a claim that low volatility works on breakouts. The
+# literature says low-volatility stocks have outperformed their risk; it says
+# nothing about the subset that has just made a twenty-day high. Composing the
+# two is this project's step, and the composite has to be judged on its own.
+VOLATILITY_LOOKBACK_SESSIONS = 60
+
+
+def inverse_volatility_60(closes: list[float], i: int) -> float | None:
+    """Negative realised volatility of daily returns over 60 sessions.
+
+    Negated so that higher scores sort first under the same descending rule
+    every ranking uses, rather than each ranking carrying its own direction.
+
+    None where the history is short or a price is non-positive: a score that
+    cannot be computed must not quietly become zero, which would sort a name
+    into the middle of the book instead of out of it.
+    """
+
+    if i < VOLATILITY_LOOKBACK_SESSIONS:
+        return None
+    window = closes[i - VOLATILITY_LOOKBACK_SESSIONS : i + 1]
+    returns = []
+    for previous, current in zip(window, window[1:]):
+        if previous is None or current is None or previous <= 0:
+            return None
+        returns.append(current / previous - 1)
+    if len(returns) < VOLATILITY_LOOKBACK_SESSIONS:
+        return None
+    mean = sum(returns) / len(returns)
+    variance = sum((r - mean) ** 2 for r in returns) / (len(returns) - 1)
+    if variance <= 0:
+        # A price that never moved for sixty sessions is not the calmest
+        # security in the market, it is one that was not trading.
+        return None
+    return -(variance ** 0.5)
+
+
 RANKINGS: dict[str, Any] = {
     "": None,
     "momentum-12-1": momentum_12_1,
+    "inverse-volatility-60": inverse_volatility_60,
 }
 
 
@@ -312,6 +367,7 @@ def run(
     ranking_name: str = "",
     universe: str = "all",
     participation_rate: Decimal = PARTICIPATION_RATE,
+    first_trading_session: str | None = None,
 ) -> dict[str, Any]:
     sessions, by_session = load_dataset(dataset_root)
     ledger = Ledger(opening_cash=opening_cash, sessions=[date.fromisoformat(s) for s in sessions])
@@ -328,6 +384,8 @@ def run(
     history_depth = lookback + 2
     if ranking_name == "momentum-12-1":
         history_depth = max(history_depth, MOMENTUM_LOOKBACK_SESSIONS + 2)
+    elif ranking_name == "inverse-volatility-60":
+        history_depth = max(history_depth, VOLATILITY_LOOKBACK_SESSIONS + 2)
     # Sessions where a candidate refused for capacity outscored one that was
     # opened. Zero is the claim that fills followed the ranking.
     # What the odd-lot liquidity mode actually did. Counted because the first
@@ -471,6 +529,15 @@ def run(
             if signal.score is not None and code in CAPACITY_REFUSALS:
                 capacity_refused_scores.append((signal.score, code))
 
+        # The sealed segment is evaluated on the full dataset with this set to
+        # its first session: a 252-session momentum score for 2025-01-02 reads
+        # 2024 prices, which were known on the day, so warming up on them is
+        # not a look-ahead. Nested validation contract section 1.
+        #
+        # Entries only. An open position still has to be allowed to exit, and
+        # there are none before the first trading session anyway.
+        if first_trading_session is not None and session < first_trading_session:
+            pending = []
         for signal in pending:
             key = (signal.market, signal.symbol)
             if key in positions:
@@ -623,6 +690,7 @@ def run(
             "signal_on_close_fill_next_open": True,
             "participation_rate": float(participation_rate),
             "universe": universe,
+            "first_trading_session": first_trading_session,
             "universe_effect": dict(suppressed),
             "stop_assumed_to_precede_target_within_a_session": True,
         },
@@ -848,6 +916,14 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--first-trading-session",
+        help=(
+            "refuse entries before this session while still reading earlier "
+            "bars for warmup. How the sealed segment is evaluated without "
+            "spending 252 of its 382 sessions on warmup"
+        ),
+    )
+    parser.add_argument(
         "--universe",
         choices=UNIVERSES,
         default="all",
@@ -876,6 +952,7 @@ def main(argv: list[str] | None = None) -> int:
         ranking_name=args.ranking,
         universe=args.universe,
         participation_rate=args.participation_rate,
+        first_trading_session=args.first_trading_session,
     )
 
     if args.report_root:

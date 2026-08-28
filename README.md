@@ -101,6 +101,8 @@ AlphaMaster 不得直接寫入正式策略、紙上帳本或真實委託；AI �
 - [M3 Owner 決定 D17：M10 阻擋事由改寫與優惠到期處置（m0-v1.2.0）](docs/evidence/m3-owner-decision-d17-2026-08-27.md)
 - [券商條款確認清單](docs/evidence/broker-terms-enquiry-2026-08-27.md)
 - [對照比較契約](docs/contracts/control-comparison-contract.md)
+- [巢狀驗證契約（M7）](docs/contracts/nested-validation-contract.md)
+- [比較計畫 001：12-1 動能 對 60 日低波動](docs/evidence/m7-comparison-plan-001-2026-08-28.md)
 
 ## 已凍結的 M0 基線
 
