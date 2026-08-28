@@ -56,7 +56,15 @@ TPEX_ACTION_LANES = (
     RAW / "m3_tpex_actions_2024-2026",
 )
 TEJ_LANE = RAW / "m3_tej_licensed_2026-08-16"
-OUT_DIR = RAW / "m3_coverage_ledger_2026-08-24-v5"
+# Bumped with the scoring, not with the run. A certificate id names a claim,
+# and re-running a changed scorer under the old id replaces an earlier claim
+# with a different one while it still answers to the same name.
+#
+# Learned by doing it: on 2026-08-28 the v5 artifact was overwritten by a run
+# that scored security lifecycle differently. The v5 content is reproducible
+# from this file's previous commit, but the id had already stopped meaning
+# what it said.
+OUT_DIR = RAW / "m3_coverage_ledger_2026-08-28-v6"
 
 WINDOW_START = date(2019, 1, 1)
 WINDOW_END = date(2026, 8, 3)
@@ -69,8 +77,23 @@ FAMILIES = (
     "corporate_action",
     "fundamental",
 )
-OFFICIAL_OK = {"covered", "official-no-data"}
+OFFICIAL_OK = {"covered", "official-no-data", "official-trading-observed"}
 VENDOR_OK = OFFICIAL_OK | {"licensed-vendor"}
+
+# `official-trading-observed` is D9 condition 2 applied to security lifecycle:
+# where an official source exists for the same fact, the official value
+# supersedes the vendor's.
+#
+# The exchange published a closing table for this market-date, so which
+# securities traded that day is officially evidenced. No vendor is needed to
+# say a security was a member of the market on a session it has an official
+# closing row for.
+#
+# Deliberately not `covered`. Official price rows evidence
+# membership-by-trading; a security listed but suspended that day has no row,
+# and closing that gap is the D8 suspension inference -- an approved
+# inference, not official evidence. Calling this `covered` would claim more
+# than the closing table says.
 
 
 def load_jsonl(path: Path) -> list[dict]:
@@ -243,13 +266,19 @@ def main() -> None:
                 families["corporate_action"] = "unknown"
                 reasons.append("tpex-action-year-not-captured")
 
-            families["security_lifecycle"] = (
-                "licensed-vendor" if tej["security_lifecycle"] else "current-only"
-            )
+            # Official first, vendor second (D9 condition 2). On a session the
+            # exchange published a closing table for, membership is official.
+            if session_state == "official-open":
+                families["security_lifecycle"] = "official-trading-observed"
+                reasons.append("lifecycle-membership-from-official-closing-table")
+            else:
+                families["security_lifecycle"] = (
+                    "licensed-vendor" if tej["security_lifecycle"] else "current-only"
+                )
             families["fundamental"] = (
                 "licensed-vendor" if tej["fundamental"] else "partial"
             )
-            reasons.append("lifecycle-and-fundamental-from-tej-licensed-vendor")
+            reasons.append("fundamental-from-tej-licensed-vendor")
 
             def aggregate(allowed: set[str]) -> str:
                 if session_state == "official-closed" and families["calendar"] == "covered":
@@ -317,8 +346,8 @@ def main() -> None:
 
     summary = {
         "schema_id": "tw-alpha-pit-coverage-certificate/1.0.0",
-        "certificate_id": "tw-alpha-m3-coverage-ledger-20260824-05",
-        "supersedes": "tw-alpha-m3-coverage-ledger-20260816-04",
+        "certificate_id": "tw-alpha-m3-coverage-ledger-20260828-06",
+        "supersedes": "tw-alpha-m3-coverage-ledger-20260824-05",
         "status": "gap-ledger-only-not-a-supported-date-certificate",
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "window": {
@@ -332,8 +361,11 @@ def main() -> None:
         "scoring_note": (
             "reconstruction_state uses official raw-v2 evidence only. "
             "reconstruction_state_if_vendor_accepted also counts TEJ "
-            "licensed-vendor-snapshot evidence. Whether the latter may "
-            "satisfy `supported` requires a G0 amendment by the Owner."
+            "licensed-vendor-snapshot evidence. G0 amendment D9 (2026-08-16) "
+            "authorised that for security lifecycle and financial "
+            "announcement dates, so the vendor scoring is the gate and the "
+            "strict scoring is D9 condition 5's disclosure. This note said "
+            "the opposite until 2026-08-28."
         ),
         "strict_counts": tally("reconstruction_state"),
         "vendor_counts": tally("reconstruction_state_if_vendor_accepted"),
@@ -353,9 +385,10 @@ def main() -> None:
             "roughly 900 requests per added year.",
             "Suspension state rests on the D8 owner-approved inference, not on "
             "official evidence.",
-            "Security lifecycle and fundamentals rest on TEJ licensed-vendor "
-            "evidence; a G0 amendment is required to decide whether that may "
-            "satisfy `supported`.",
+            "Fundamentals rest on TEJ licensed-vendor evidence, authorised by "
+            "G0 amendment D9 (2026-08-16). Security lifecycle now scores "
+            "`official-trading-observed` on published sessions, per D9 "
+            "condition 2: official evidence supersedes the vendor's.",
         ],
     }
     (OUT_DIR / "coverage_summary.json").write_text(

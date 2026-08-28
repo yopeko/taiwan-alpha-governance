@@ -323,8 +323,37 @@ class TestTheContractNamesTheRightBlockers:
         contract = (REPO / "docs" / "m0-project-contract.md").read_text(
             encoding="utf-8"
         )
-        for phrase in ("簽署的券商條款", "零股成交證據"):
+        for phrase in ("開戶成功通知信", "零股成交證據"):
             assert phrase in contract, f"M0 no longer names {phrase} as a blocker"
+
+    def test_the_blocker_points_at_something_obtainable(self):
+        """m0-v1.3.0, D18.
+
+        v1.2.0 asked for "signed broker terms". A promotion is not written
+        into the account-opening master agreement, so that document does not
+        exist and the condition could never be met.
+
+        A blocking condition pointing at a non-existent object is as bad as
+        one that declares its own conditions met -- the first never lifts, the
+        second lifts by accident, and v1.2.0 existed to fix the second.
+        """
+
+        contract = (REPO / "docs" / "m0-project-contract.md").read_text(
+            encoding="utf-8"
+        )
+        assert "m0-v1.3.0" in contract
+        assert "簽署的券商條款**。已發布的費率頁" not in contract, (
+            "the superseded wording is back"
+        )
+        assert "可取得的證據上限" in contract, (
+            "M0 must state that publisher notice plus account confirmation is "
+            "the ceiling this market offers, not a contract"
+        )
+
+    def test_the_d18_record_exists(self):
+        record = REPO / "docs" / "evidence" / "m3-owner-decision-d18-2026-08-28.md"
+        assert record.is_file()
+        assert "m0-v1.3.0" in record.read_text(encoding="utf-8")
 
     def test_the_decision_record_exists(self):
         """A contract version bump without its decision record is unsourced."""
