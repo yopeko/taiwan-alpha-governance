@@ -1,4 +1,4 @@
-"""Append one backtest run to the development trial ledger.
+"""Append one run on the research data to the development trial ledger.
 
 The trial ledger contract in executable form, written to close an asymmetry:
 this project counts seal openings carefully -- append-only ledger, guard
@@ -28,9 +28,13 @@ from typing import Any
 
 REPO = Path(__file__).resolve().parents[2]
 
-CONTRACT_VERSION = "trial-ledger-v1.0.0"
+CONTRACT_VERSION = "trial-ledger-v1.1.0"
 LEDGER_NAME = "development_trials.jsonl"
-PURPOSES = ("probe", "candidate", "sensitivity", "parameter-search")
+# `diagnostic` added 2026-08-28. Section 1 said "a backtest" until the rank
+# quality measurement turned out to be neither a backtest nor exempt: no
+# positions, no fills, no cost model, and it still looked at the data and
+# changed how candidate 003 reads.
+PURPOSES = ("probe", "candidate", "sensitivity", "parameter-search", "diagnostic")
 RECORD_BASES = ("contemporaneous", "reconstructed")
 
 

@@ -114,6 +114,8 @@ AlphaMaster 不得直接寫入正式策略、紙上帳本或真實委託；AI �
 - [M3 Owner 決定 D18：M6.1 依 D9 結案、M10 阻擋改為可取得的證據（m0-v1.3.0）](docs/evidence/m3-owner-decision-d18-2026-08-28.md)
 - [候選計畫 003：拿掉突破，讓排序第一次獨立被量](docs/evidence/m7-candidate-plan-003-2026-08-28.md)
 - [候選 003 結果：第一次有東西通過門檻，而我的預期被否證了](docs/evidence/m7-candidate-003-result-2026-08-28.md)
+- [LTR 論文可學項目：可學什麼、怎麼落地](docs/evidence/ltr-paper-learnings-2026-08-28.md)
+- [排名品質量測 001：動能的排序能力與零無法區分](docs/evidence/rank-quality-001-2026-08-28.md)
 
 ## 已凍結的 M0 基線
 
