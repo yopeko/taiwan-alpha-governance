@@ -23,6 +23,7 @@ sys.path.insert(0, str(REPO / "scripts" / "m6"))
 
 from rank_quality import (  # noqa: E402
     QUINTILES,
+    stability,
     ndcg_at,
     pearson,
     quintile_of,
@@ -119,6 +120,76 @@ class TestQuintilesSplitEvenly:
         for total in (11, 37, 100, 341):
             for position in range(total):
                 assert 0 <= quintile_of(position, total) < QUINTILES
+
+
+class TestStabilityAnswersWhatTheTStatCannot:
+    """Walk-forward, adapted. Every ranking here has zero parameters, so the
+    paper's training discipline has nothing to train -- what carries over is
+    the other half: is the number stable, or is a pooled average hiding a few
+    periods that carry it?
+
+    The t statistic cannot separate those when cross-sections overlap, and
+    these overlap heavily. A per-year series can.
+    """
+
+    def sections(self, ics):
+        return [
+            {"session": session, "rank_ic": ic} for session, ic in ics
+        ]
+
+    def test_a_consistently_positive_ranking_is_sign_stable(self):
+        result = stability(
+            self.sections(
+                [("2020-01-01", 0.05), ("2021-01-01", 0.06), ("2022-01-01", 0.04)]
+            )
+        )
+        assert result["sign_stable_across_years"] is True
+        assert result["ic_hit_rate"] == 1.0
+
+    def test_a_sign_flip_between_years_is_reported(self):
+        """momentum-12-1's actual shape: negative 2020-2022, positive after.
+
+        A pooled mean of -0.008 says "no effect"; the yearly series says
+        "no effect, and not even a stable no-effect".
+        """
+
+        result = stability(
+            self.sections(
+                [("2020-01-01", -0.02), ("2021-01-01", -0.03), ("2023-01-01", 0.01)]
+            )
+        )
+        assert result["sign_stable_across_years"] is False
+
+    def test_one_carrying_period_shows_in_the_yearly_breakdown(self):
+        """A mean of +0.05 from one +0.30 year and four zeros is not the same
+        finding as +0.05 every year, and the pooled number cannot say which."""
+
+        result = stability(
+            self.sections(
+                [
+                    ("2019-01-01", 0.0),
+                    ("2020-01-01", 0.0),
+                    ("2021-01-01", 0.30),
+                    ("2022-01-01", 0.0),
+                ]
+            )
+        )
+        assert result["best_year"] == "2021"
+        assert result["ic_by_year"]["2021"]["mean_ic"] == pytest.approx(0.30)
+        assert result["ic_hit_rate"] == 0.25
+
+    def test_the_expanding_mean_is_in_order_and_ends_at_the_pooled_mean(self):
+        ics = [("2020-01-01", 0.1), ("2020-02-01", 0.3), ("2020-03-01", 0.2)]
+        result = stability(self.sections(ics))
+        running = result["expanding_mean_ic"]
+        assert [r["session"] for r in running] == [s for s, _ in ics]
+        assert running[-1]["expanding_mean_ic"] == pytest.approx(0.2)
+
+    def test_sections_without_an_ic_are_left_out_rather_than_counted_as_zero(self):
+        result = stability(
+            self.sections([("2020-01-01", 0.1), ("2020-02-01", None)])
+        )
+        assert result["ic_hit_rate"] == 1.0
 
 
 class TestTheLimitationTravelsWithTheNumbers:

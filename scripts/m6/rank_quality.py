@@ -224,6 +224,59 @@ def quintile_returns(sections: list[dict[str, Any]]) -> list[float | None]:
     return [sum(b) / len(b) if b else None for b in buckets]
 
 
+def stability(sections: list[dict[str, Any]]) -> dict[str, Any]:
+    """Walk-forward, adapted rather than copied.
+
+    The paper walks forward to *train*: month T's model sees only [0, T-1].
+    Every ranking here has zero parameters, so there is nothing to fit and
+    nothing to leak -- every cross-section is already out of sample.
+
+    What the discipline is still worth is the other half: **is the number
+    stable, or is a pooled average hiding a few periods that carry it?** The
+    nested validation contract section 6 admits this project runs one holdout
+    rather than folds; a per-period series is the cheapest honest answer to
+    that, and it costs nothing but reporting what was already computed.
+
+    A mean IC of +0.07 from sixty-six cross-sections can be sixty-six small
+    positives or four large ones and sixty-two zeros. The t statistic cannot
+    tell those apart when the sections overlap, and these overlap heavily.
+    """
+
+    ics = [(s["session"], s["rank_ic"]) for s in sections if s["rank_ic"] is not None]
+    if not ics:
+        return {}
+
+    by_year: dict[str, list[float]] = defaultdict(list)
+    for session, ic in ics:
+        by_year[session[:4]].append(ic)
+
+    # Expanding mean, in order. Converging towards a level is what a real
+    # effect looks like; drifting or jumping late is what one carried by a few
+    # periods looks like.
+    running: list[dict[str, Any]] = []
+    total = 0.0
+    for index, (session, ic) in enumerate(ics, start=1):
+        total += ic
+        running.append({"session": session, "expanding_mean_ic": total / index})
+
+    positive = sum(1 for _, ic in ics if ic > 0)
+    yearly = {
+        year: {"cross_sections": len(v), "mean_ic": sum(v) / len(v)}
+        for year, v in sorted(by_year.items())
+    }
+    return {
+        "ic_hit_rate": positive / len(ics),
+        "ic_by_year": yearly,
+        "best_year": max(yearly, key=lambda y: yearly[y]["mean_ic"]),
+        "worst_year": min(yearly, key=lambda y: yearly[y]["mean_ic"]),
+        "expanding_mean_ic": running,
+        "sign_stable_across_years": (
+            all(v["mean_ic"] > 0 for v in yearly.values())
+            or all(v["mean_ic"] < 0 for v in yearly.values())
+        ),
+    }
+
+
 def summarise(sections: list[dict[str, Any]], ranking_name: str) -> dict[str, Any]:
     ics = [s["rank_ic"] for s in sections if s["rank_ic"] is not None]
     ndcgs = [s["ndcg"] for s in sections if s["ndcg"] is not None]
@@ -253,6 +306,7 @@ def summarise(sections: list[dict[str, Any]], ranking_name: str) -> dict[str, An
         "mean_ndcg_at_10": sum(ndcgs) / len(ndcgs) if ndcgs else None,
         "quintile_mean_forward_return": quintiles,
         "quintile_monotone": monotone,
+        "stability": stability(sections),
         "reading_note": (
             "Forward returns use unadjusted closes; this warehouse has no "
             "adjusted series and M0 forbids deriving one without a documented "
@@ -295,6 +349,19 @@ def main(argv: list[str] | None = None) -> int:
     for i, value in enumerate(report["quintile_mean_forward_return"]):
         print(f"     Q{i + 1}  {value:+.4%}" if value is not None else f"     Q{i + 1}  n/a")
     print(f"  單調 {report['quintile_monotone']}")
+
+    st = report.get("stability") or {}
+    if st:
+        print(f"\n  IC 為正的截面比例  {st['ic_hit_rate']:.1%}")
+        print(f"  各年份符號一致      {st['sign_stable_across_years']}")
+        print("  逐年平均 IC:")
+        for year, v in st["ic_by_year"].items():
+            print(f"     {year}  {v['mean_ic']:+.4f}  （{v['cross_sections']} 個截面）")
+        tail = st["expanding_mean_ic"][-1]["expanding_mean_ic"]
+        head = st["expanding_mean_ic"][min(11, len(st["expanding_mean_ic"]) - 1)][
+            "expanding_mean_ic"
+        ]
+        print(f"  擴張平均 IC：前 12 個截面 {head:+.4f} → 全部 {tail:+.4f}")
 
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
