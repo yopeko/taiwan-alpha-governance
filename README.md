@@ -103,6 +103,7 @@ AlphaMaster 不得直接寫入正式策略、紙上帳本或真實委託；AI �
 - [對照比較契約](docs/contracts/control-comparison-contract.md)
 - [巢狀驗證契約（M7）](docs/contracts/nested-validation-contract.md)
 - [比較計畫 001：12-1 動能 對 60 日低波動](docs/evidence/m7-comparison-plan-001-2026-08-28.md)
+- [比較 001 結果：兩個候選誰都沒有勝出](docs/evidence/m7-comparison-001-result-2026-08-28.md)
 
 ## 已凍結的 M0 基線
 
