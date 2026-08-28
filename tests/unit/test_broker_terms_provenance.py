@@ -39,6 +39,9 @@ from broker_terms import (  # noqa: E402
     CAPTURED_ON,
     M10_OUTSTANDING,
     PROMOTION_MONTHLY_TURNOVER_CAP,
+    PUBLISHED_PDF_PATH,
+    PUBLISHED_PDF_SHA256,
+    REPORTING_DEFAULT_TERMS,
     PROMOTION_OVER_CAP_DISCOUNT,
     REBATE_MECHANICS,
     ODD_LOT_BILLING,
@@ -87,8 +90,130 @@ class TestTheNumbersMatchTheSourceRegister:
 class TestNoSetClaimsMoreThanItHas:
     """M0 section 4.2. The states are ranked and not interchangeable."""
 
-    def test_a_published_page_is_not_a_signed_agreement(self):
-        assert SINOPAC_PUBLISHED.evidence_state == "publisher-published-rate"
+    def test_the_published_schedule_is_an_archived_document(self):
+        """Upgraded 2026-08-29: the PDF is kept with its bytes and a hash, so
+        the claim can be re-checked rather than re-read from a live page."""
+
+        assert SINOPAC_PUBLISHED.evidence_state == "publisher-archived-pdf"
+
+    def test_the_archived_pdf_is_present_and_unchanged(self):
+        """A hash recorded without the file is a claim about nothing."""
+
+        import hashlib
+
+        pdf = REPO / PUBLISHED_PDF_PATH
+        assert pdf.is_file(), f"{PUBLISHED_PDF_PATH} is missing"
+        assert (
+            hashlib.sha256(pdf.read_bytes()).hexdigest() == PUBLISHED_PDF_SHA256
+        )
+
+    def test_the_archived_pdf_does_not_carry_the_promotional_terms(self):
+        """The half that matters is the half it does not contain.
+
+        The cost model uses a NT$1 minimum, which makes a NT$904 round trip
+        cost 0.44%. This document says NT$20, which makes it 4.67%. Archiving
+        it upgrades the terms nobody was using and leaves the ones in use
+        exactly where they were: owner-supplied, with no document behind them.
+
+        The account-opening confirmation was expected to close that gap and,
+        checked on 2026-08-29, repeats this same schedule.
+        """
+
+        text = (
+            REPO / "docs" / "evidence" / "broker"
+            / "sinopac-service-charge-2024-11-28.txt"
+        ).read_text(encoding="utf-8")
+        assert "千分之 1.425（低收 20 元）" in text
+        assert "2 折" not in text
+        assert "低收 1 元" not in text
+
+    def test_the_archived_pdf_does_not_name_the_broker(self):
+        """So its provenance still rests on the URL it came from, exactly as
+        D14/D15 recorded. Archiving did not change that."""
+
+        text = (
+            REPO / "docs" / "evidence" / "broker"
+            / "sinopac-service-charge-2024-11-28.txt"
+        ).read_text(encoding="utf-8")
+        assert "永豐" not in text and "SinoPac" not in text
+
+    def test_the_rebate_clause_the_ledger_models_against_is_in_the_document(self):
+        """M5 change spec section 3.4 models the 15th because the wording is
+        "earlier if a holiday" -- the latest a rebate can arrive, so the
+        receivable is held as long as it possibly could be. That reading now
+        has a document rather than a web page."""
+
+        text = (
+            REPO / "docs" / "evidence" / "broker"
+            / "sinopac-service-charge-2024-11-28.txt"
+        ).read_text(encoding="utf-8")
+        assert "次月 15 日退回至客戶交割帳戶" in text
+        assert "遇假日則提早" in text
+
+    def test_the_reporting_default_is_the_published_schedule(self):
+        """D19. The published figure has an archived PDF behind it; the
+        promotional one has a transcription of a screenshot and **no document
+        connecting it to this account** -- the account-opening confirmation
+        returns the same published schedule.
+
+        A tenfold advantage with nothing tying it to this account is not a
+        default. `BrokerTerms()` already behaved this way; nobody had said so.
+        """
+
+        from m4.rules import BrokerTerms
+
+        assert REPORTING_DEFAULT_TERMS is SINOPAC_PUBLISHED
+        assert not REPORTING_DEFAULT_TERMS.has_rebate
+        assert REPORTING_DEFAULT_TERMS.minimum_commission == Decimal("20")
+        assert BrokerTerms().minimum_commission == Decimal("20")
+        assert not BrokerTerms().has_rebate
+
+    def test_m0_names_the_published_schedule_as_the_reporting_basis(self):
+        contract = (REPO / "docs" / "m0-project-contract.md").read_text(
+            encoding="utf-8"
+        )
+        assert "m0-v1.4.0" in contract
+        assert "預設成本基礎" in contract
+
+    def test_m0_forbids_blockers_built_on_unread_documents(self):
+        """The rule D19 added after making the same mistake twice.
+
+        v1.2.0 assumed a signed agreement would carry the promotion; it does
+        not. v1.3.0 assumed the account confirmation would state campaign
+        rates; it repeats the published schedule. Different consequences, one
+        cause: a condition written about a document nobody had opened.
+        """
+
+        contract = (REPO / "docs" / "m0-project-contract.md").read_text(
+            encoding="utf-8"
+        )
+        assert "該前提必須先經檢視" in contract
+
+    def test_the_promotion_now_has_publisher_wording_behind_it(self):
+        """Upgraded by the fee-page transcription, and the archive says which
+        parts were upgraded and which were not."""
+
+        archive = (
+            REPO / "docs" / "evidence" / "broker"
+            / "sinopac-fee-page-promotion-2026-08-29.md"
+        ).read_text(encoding="utf-8")
+        assert "2 折 (0.285‰)" in archive
+        assert "每筆不足 20 元以 20 元計" in archive
+        assert "沒有寫到哪一天" in archive
+
+    def test_the_transcription_states_its_own_weaker_chain(self):
+        """Bytes with a hash can be re-checked; a transcription of a
+        screenshot cannot. The state name says which one this is."""
+
+        assert (
+            SINOPAC_PROMOTIONAL_2026.evidence_state
+            == "publisher-stated-via-owner-screenshot"
+        )
+        archive = (
+            REPO / "docs" / "evidence" / "broker"
+            / "sinopac-fee-page-promotion-2026-08-29.md"
+        ).read_text(encoding="utf-8")
+        assert "發布者頁面 → 截圖 → Owner → 轉錄" in archive
 
     def test_an_answer_the_page_is_silent_on_is_owner_supplied(self):
         """The promotion's end date and the odd-lot rules are both answers.
@@ -97,7 +222,6 @@ class TestNoSetClaimsMoreThanItHas:
         above `assumption` is that a named person answered on a recorded date.
         """
 
-        assert SINOPAC_PROMOTIONAL_2026.evidence_state == "owner-supplied"
         assert ODD_LOT_BILLING_EVIDENCE == "owner-supplied"
 
     def test_the_cost_breakdown_carries_the_state_to_the_caller(self):
@@ -109,7 +233,10 @@ class TestNoSetClaimsMoreThanItHas:
             quantity=18,
             terms=SINOPAC_PROMOTIONAL_2026,
         )
-        assert costs.terms_evidence_state == "owner-supplied"
+        assert (
+            costs.terms_evidence_state
+            == "publisher-stated-via-owner-screenshot"
+        )
 
 
 class TestTheOddLotAnswersAreRecordedNotRemembered:
@@ -323,7 +450,11 @@ class TestTheContractNamesTheRightBlockers:
         contract = (REPO / "docs" / "m0-project-contract.md").read_text(
             encoding="utf-8"
         )
-        for phrase in ("開戶成功通知信", "零股成交證據"):
+        # v1.4.0 (D19): the second half is no longer "the confirmation letter"
+        # -- that was checked and returns the published schedule. It is now
+        # written as what is actually wanted, with the honest admission that
+        # nobody knows whether such a document exists.
+        for phrase in ("連起來的文件", "零股成交證據"):
             assert phrase in contract, f"M0 no longer names {phrase} as a blocker"
 
     def test_the_blocker_points_at_something_obtainable(self):

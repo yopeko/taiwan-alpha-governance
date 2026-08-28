@@ -14,6 +14,11 @@ reads as a verified fact unless something next to it says otherwise.
 Three evidence states appear here, and they are not interchangeable:
 
     assumption              M0's research defaults. Nobody's terms.
+    publisher-archived-pdf  The publisher's own document, kept with its bytes
+                            and a hash. Stronger than a reading of a page,
+                            because the artifact can be re-checked. Still not
+                            a signed agreement, and this one does not even
+                            name the broker.
     publisher-published-rate  On the broker's own page on a recorded date.
                             Not a signed agreement.
     owner-supplied          The Owner answered a question the page is silent
@@ -41,13 +46,44 @@ SOURCE_URL = "https://www.sinotrade.com.tw/newweb/Fee_Rate/?market=S"
 SOURCE_INSTITUTION = "永豐金證券股份有限公司"
 CAPTURED_ON = date(2026, 8, 25)
 
+# The published schedule, archived 2026-08-29 with its bytes and a hash, at
+# docs/evidence/broker/. Dated 2024-11-28 by the document itself.
+#
+# What it proves: the standing rate of 1.425 per mille with a NT$20 minimum,
+# and the rebate mechanism -- "charged in full, returned on the 15th of the
+# following month, **earlier if that is a holiday**". That last clause is the
+# one the ledger models against, and it now has a document instead of a
+# reading of a web page.
+#
+# What it does not contain, checked rather than assumed:
+#
+#   the broker's name        (so provenance still rests on the URL)
+#   the 2026 promotion       (no 2-tenths discount, no NT$1 minimum)
+#   odd-lot commission       ("零股領回 40 元" is a withdrawal service fee,
+#                             not a trading commission)
+#   any expiry date
+#
+# So archiving it upgrades the terms that make a NT$904 round trip cost 4.67%,
+# and leaves untouched the terms that make it 0.44% -- which are the ones the
+# cost model has been using. The promotion still has no document behind it.
+PUBLISHED_PDF_SHA256 = (
+    "f95ddd8462b093cd2cbd7a3c7fe4d6519ec48713acde9593870dab4efbe44b30"
+)
+PUBLISHED_PDF_DOCUMENT_DATE = date(2024, 11, 28)
+PUBLISHED_PDF_ARCHIVED_ON = date(2026, 8, 29)
+PUBLISHED_PDF_PATH = "docs/evidence/broker/sinopac-service-charge-2024-11-28.pdf"
+
 # The published schedule. Undated on purpose: it is the standing rate, and
 # what it will be in 2028 is not something the capture can say.
 SINOPAC_PUBLISHED = BrokerTerms(
     commission_rate=Decimal("0.001425"),
     minimum_commission=Decimal("20"),
-    evidence_state="publisher-published-rate",
-    source=f"{SOURCE_INSTITUTION} {SOURCE_URL} captured {CAPTURED_ON}",
+    evidence_state="publisher-archived-pdf",
+    source=(
+        f"{SOURCE_INSTITUTION} {SOURCE_URL}; archived PDF dated "
+        f"{PUBLISHED_PDF_DOCUMENT_DATE}, sha256 {PUBLISHED_PDF_SHA256[:16]}…, "
+        f"kept at {PUBLISHED_PDF_PATH}"
+    ),
 )
 
 # The 2026 promotion. Charged in full at execution and returned on the 15th of
@@ -73,12 +109,31 @@ SINOPAC_PROMOTIONAL_2026 = BrokerTerms(
     rebate_payment_day=15,
     effective_from=date(2026, 1, 1),
     effective_through=PROMOTION_EXPIRES,
-    evidence_state="owner-supplied",
+    evidence_state="publisher-stated-via-owner-screenshot",
     source=(
-        f"{SOURCE_INSTITUTION} {SOURCE_URL} captured {CAPTURED_ON}; "
-        "promotion window and odd-lot billing owner-supplied 2026-08-25"
+        f"{SOURCE_INSTITUTION} {SOURCE_URL}; page transcribed from an Owner "
+        "screenshot 2026-08-29 (docs/evidence/broker/"
+        "sinopac-fee-page-promotion-2026-08-29.md). The end date, odd-lot "
+        "applicability and over-cap tiering remain owner-supplied"
     ),
 )
+
+# D19, 2026-08-29. The default cost basis for every report is the published
+# schedule, not the promotion.
+#
+# At M0's risk policy a NT$904 round trip costs 4.67% published and 0.44%
+# promotional. The published figure rests on an archived PDF with a hash; the
+# promotional one rests on a transcription of a screenshot, and **no document
+# connects that promotion to this account** -- the account-opening
+# confirmation, checked on 2026-08-29, returns the same published schedule.
+#
+# A tenfold advantage with no document tying it to this account is not
+# something a conclusion should assume by default.
+#
+# No code change was needed: `BrokerTerms()` already defaults to the published
+# schedule with no rebate, and all sixteen trials ran under it. What was
+# missing was anyone saying which one was the default.
+REPORTING_DEFAULT_TERMS = SINOPAC_PUBLISHED
 
 # The five odd-lot questions the captured page does not answer, and the
 # answers given on 2026-08-25. Recorded as data because three of them are
