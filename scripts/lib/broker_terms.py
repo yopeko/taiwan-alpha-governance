@@ -95,6 +95,41 @@ ODD_LOT_BILLING = {
 ODD_LOT_BILLING_EVIDENCE = "owner-supplied"
 ODD_LOT_BILLING_ANSWERED_ON = date(2026, 8, 25)
 
+# The four the captured page is silent on and the M5 fee-rebate spec listed as
+# unresolved. Answered 2026-08-28, same evidence state as the odd-lot set.
+#
+# Two of them decide whether a modelling choice already made was right.
+#
+# `rebate_receivable_survives_account_closure`: the ledger counts an unpaid
+# rebate towards NAV but never towards buying power. That is only defensible
+# if the money actually arrives. Closing an account requires settling first --
+# the branch will not complete a closure while a rebate is outstanding -- so
+# it does.
+#
+# `statement_granularity_is_per_fill`: invariant 4 requires every fee to trace
+# back to an order or fill, and the rebate arrives as one monthly lump. It is
+# reconcilable because the broker's electronic statement itemises the rebate
+# per fill, and the month's items sum to the lump.
+REBATE_MECHANICS = {
+    "statement_granularity_is_per_fill": True,
+    "monthly_lump_reconciles_to_itemised_statement": True,
+    "electronic_volume_cap_is_per_calendar_month": True,
+    "over_cap_is_tiered_not_forfeited": True,
+    "rebate_receivable_survives_account_closure": True,
+    "rebate_survives_early_termination_for_fills_already_made": True,
+}
+
+REBATE_MECHANICS_EVIDENCE = "owner-supplied"
+REBATE_MECHANICS_ANSWERED_ON = date(2026, 8, 28)
+
+# The promotional tier ceiling, and what applies above it. Neither scale this
+# project runs at can reach it -- the reference scale turns over roughly
+# NT$385k a month against a NT$1m cap -- but "cannot reach" is not "does not
+# exist", and a model that silently ignored the tier would be wrong for a
+# larger account rather than merely inapplicable.
+PROMOTION_MONTHLY_TURNOVER_CAP = Decimal("1000000")
+PROMOTION_OVER_CAP_DISCOUNT = Decimal("0.38")
+
 # What is still missing before M10 can stop being blocked. Not the fee rules
 # -- those are answered, at the states above. These two are different things
 # that the fee question kept getting confused with.

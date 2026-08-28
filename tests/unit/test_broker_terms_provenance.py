@@ -38,6 +38,9 @@ sys.path.insert(0, str(REPO / "scripts" / "lib"))
 from broker_terms import (  # noqa: E402
     CAPTURED_ON,
     M10_OUTSTANDING,
+    PROMOTION_MONTHLY_TURNOVER_CAP,
+    PROMOTION_OVER_CAP_DISCOUNT,
+    REBATE_MECHANICS,
     ODD_LOT_BILLING,
     ODD_LOT_BILLING_EVIDENCE,
     PROMOTION_EXPIRES,
@@ -129,6 +132,65 @@ class TestTheOddLotAnswersAreRecordedNotRemembered:
         """`_truncate_to_dollar` uses ROUND_DOWN, and this is why."""
 
         assert ODD_LOT_BILLING["commission_fraction_is_truncated_down"]
+
+
+class TestTheRebateMechanicsAnswersAreRecorded:
+    """The four the M5 fee-rebate spec listed as unresolved, answered
+    2026-08-28. Two of them decide whether a modelling choice already made
+    was right, which is why they are data rather than a paragraph.
+    """
+
+    def test_the_receivable_actually_arrives(self):
+        """The ledger counts an unpaid rebate towards NAV, never towards
+        buying power. That is only defensible if the money arrives.
+
+        It does: closing an account requires settling first, and the branch
+        will not complete a closure while a rebate is outstanding. Had the
+        answer been the other way, `rebate_receivable` in `nav()` would have
+        been an asset that could evaporate.
+        """
+
+        assert REBATE_MECHANICS["rebate_receivable_survives_account_closure"]
+        assert REBATE_MECHANICS[
+            "rebate_survives_early_termination_for_fills_already_made"
+        ]
+
+    def test_the_monthly_lump_can_be_traced_back_to_fills(self):
+        """M0 invariant 4: every fee traces to an order or fill.
+
+        The rebate arrives as one monthly credit, which would break that. It
+        does not, because the broker's statement itemises the rebate per fill
+        and the month's items sum to the credit.
+        """
+
+        assert REBATE_MECHANICS["statement_granularity_is_per_fill"]
+        assert REBATE_MECHANICS["monthly_lump_reconciles_to_itemised_statement"]
+
+    def test_the_volume_cap_is_tiered_rather_than_forfeited(self):
+        """Over the cap the excess reverts; the month is not lost.
+
+        The M5 spec had assumed the model should refuse outright above the
+        cap. Tiered is a different rule, and neither scale here reaches the
+        cap anyway -- which is a reason to record it, not to omit it.
+        """
+
+        assert REBATE_MECHANICS["electronic_volume_cap_is_per_calendar_month"]
+        assert REBATE_MECHANICS["over_cap_is_tiered_not_forfeited"]
+
+    def test_the_cap_is_out_of_reach_at_both_scales_this_project_uses(self):
+        """Recorded as a fact with a margin, not as an absence.
+
+        The reference scale turns over roughly NT$385k a month against a
+        NT$1m cap. "Cannot reach" is not "does not exist": a model that
+        ignored the tier would be wrong for a larger account.
+        """
+
+        monthly_turnover_at_reference = Decimal("385000")
+        assert monthly_turnover_at_reference < PROMOTION_MONTHLY_TURNOVER_CAP
+        assert PROMOTION_OVER_CAP_DISCOUNT > Decimal("0.20"), (
+            "the over-cap discount must be worse than the promotional 2 折, "
+            "or exceeding the cap would be an improvement"
+        )
 
 
 class TestTermsKnowWhenTheyWereInForce:

@@ -10,7 +10,12 @@
 | M1 架構與重用稽核 | complete | 2026-08-02 | [M1 架構與重用稽核](docs/m1-architecture-reuse-audit.md) |
 | M2 官方不可變原始資料 | complete | 2026-08-03 | 36 sources、56 live observations、55 initial accepted + 1 released quarantine、0 unresolved；正式封存與 E: 備份均通過稽核。[M2 closure evidence](docs/evidence/m2-owner-approvals-release-and-durable-audit-2026-08-03.md) |
 | M3 Point-in-time warehouse | complete（附七項已記錄例外）| 2026-08-17 | G0 §5 條件 1、2、3、5 通過，條件 4 部分通過。Validation Owner 已簽核。[Exit review](docs/evidence/m3-8-exit-review-2026-08-17.md)、[M3 計畫](docs/m3-point-in-time-warehouse-plan.md) |
-| M4 台股規則與成本 | in progress | - | 參考實作與 50 項測試完成；檔位由 406,445 筆官方收盤價實測推導。剩除權息日漲跌停公式、減資、新上市前五日與上游化。[M4 契約](docs/contracts/m4-market-rules-contract.md) |
+| M4 台股規則與成本 | complete | 2026-08-19 | 檔位由 406,445 筆官方收盤價實測推導；三種漲跌停皆以官方公布值驗證。參考實作已上游化至 Taiwan Core。[M4 契約](docs/contracts/m4-market-rules-contract.md)、[M4.2 上游化](docs/evidence/m4-2-upstream-to-taiwan-core-2026-08-19.md) |
+| M5 現金／股票帳本 | complete | 2026-08-19 | M0 §6 六項不變量全部以測試強制；手續費折讓於 2026-08-25 實作。[M5 證據](docs/evidence/m5-cash-share-ledger-2026-08-19.md) |
+| M6 AlphaMaster adapter | in progress | - | 帳本驅動器在 1,840 場次的六年窗口跑完；候選報告與對照比較契約落地。第一個被排序的候選已否決。[M6.3](docs/evidence/m6-3-first-ranked-candidate-2026-08-26.md) |
+| M7 巢狀驗證 | in progress | - | 切分方法與封存機制落地（界線 2025-01-01），封存區**開封次數 0**。[巢狀驗證契約](docs/contracts/nested-validation-contract.md) |
+
+本表在 2026-08-28 之前停在 M4 且記為 in progress，而里程碑登錄從 2026-08-19 起就是 complete。兩份文件對同一件事說了九天不同的話。
 
 詳細狀態及退出門檻見 [里程碑登錄表](docs/milestone-register.md)。
 
@@ -40,7 +45,7 @@ shadow -> paper -> human-approved canary -> formal
 
 AlphaMaster 不得直接寫入正式策略、紙上帳本或真實委託；AI 分析不得進入自動評分、升級或下單路徑。
 
-衡量規模與執行規模的分離見 [ADR-0002](docs/adr/0002-measurement-scale-separate-from-execution-scale.md)（**Accepted，2026-08-25**）：M0 §8 的 NT$10,000 × 2 名額是執行組態，不是衡量組態；在該規模下產生的報酬數字不得作為策略優劣的證據。其在帳本上的實作見 [M5 手續費折讓變更說明](docs/m5-fee-rebate-change-spec.md)（**已於 2026-08-25 實作**）：券商折讓為先收後退，同一筆成交因而有實扣與淨額兩個成本，應收退款計入 NAV 但不計入購買力。
+衡量規模與執行規模的分離見 [ADR-0002](docs/adr/0002-measurement-scale-separate-from-execution-scale.md)（**Accepted，2026-08-25**）：M0 §8 的 NT$10,000 與其名額數是執行組態，不是衡量組態；在該規模下產生的報酬數字不得作為策略優劣的證據。其在帳本上的實作見 [M5 手續費折讓變更說明](docs/m5-fee-rebate-change-spec.md)（**已於 2026-08-25 實作**）：券商折讓為先收後退，同一筆成交因而有實扣與淨額兩個成本，應收退款計入 NAV 但不計入購買力。
 
 ## 核心契約
 
