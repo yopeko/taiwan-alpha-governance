@@ -121,6 +121,7 @@ AlphaMaster 不得直接寫入正式策略、紙上帳本或真實委託；AI �
 - [候選 004b 結果：誰都沒有通過，而計畫要求的那一欄把比較本身推翻了](docs/evidence/m7-candidate-004b-result-2026-08-28.md)
 - [候選計畫 005：把唯一有排序能力的東西裝上唯一有效的進場規則](docs/evidence/m7-candidate-plan-005-2026-08-28.md)
 - [候選 005 結果：預期對了，理由錯了，而正確的理由前一天就量出來了](docs/evidence/m7-candidate-005-result-2026-08-29.md)
+- [D9 條件 4：可分離重跑，量出廠商依賴值多少](docs/evidence/d9-condition-4-separable-rerun-2026-08-29.md)
 
 ## 已凍結的 M0 基線
 

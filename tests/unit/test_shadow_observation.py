@@ -178,6 +178,72 @@ class TestTheLedgerRefusesTheThingsThatWouldSpoilIt:
         assert "unknown reason codes" in str(caught.value)
 
 
+class TestAnObservationHasToBeMadeOnTheDay:
+    """The capture side, added 2026-08-29.
+
+    Until it existed, `observe_session.py` had nothing to compare against and
+    the count could not leave 0 however many days passed. What makes the file
+    an observation rather than a reconstruction is only *when* it was written,
+    so the refusal is the whole mechanism.
+    """
+
+    def test_a_past_session_is_refused(self, tmp_path):
+        sys.path.insert(0, str(REPO / "scripts" / "m9"))
+        import capture_observation
+
+        with pytest.raises(SystemExit) as caught:
+            capture_observation.main(
+                ["--out", str(tmp_path / "o.json"), "--session", "2020-01-02"]
+            )
+        message = str(caught.value)
+        assert "not today" in message
+        assert "reconstruction" in message
+
+    def test_the_refusal_explains_why_rather_than_just_refusing(self, tmp_path):
+        """A reconstruction compared against the warehouse's reconstruction is
+        one answer compared with itself, which would report zero divergence
+        forever and look like the strongest possible validation."""
+
+        sys.path.insert(0, str(REPO / "scripts" / "m9"))
+        import capture_observation
+
+        with pytest.raises(SystemExit) as caught:
+            capture_observation.main(
+                ["--out", str(tmp_path / "o.json"), "--session", "2020-01-02"]
+            )
+        assert "one answer with itself" in str(caught.value)
+
+    def test_the_escape_hatch_marks_the_file_unusable(self):
+        """Inspecting the format is legitimate; feeding it to the ledger is
+        not, so the file says so about itself rather than relying on whoever
+        finds it later to remember."""
+
+        source = (REPO / "scripts" / "m9" / "capture_observation.py").read_text(
+            encoding="utf-8"
+        )
+        assert "backfill-unusable" in source
+        assert "Must not be passed to observe_session.py" in source
+
+    def test_it_does_not_fill_in_tradability(self):
+        """Tradability is a warehouse judgement built from status and actions,
+        not something the closing table states. An observation that filled it
+        would be reconstructing -- which is the side being compared against."""
+
+        source = (REPO / "scripts" / "m9" / "capture_observation.py").read_text(
+            encoding="utf-8"
+        )
+        assert '"tradability": {}' in source
+
+    def test_a_missing_closing_table_is_unobserved_not_closed(self):
+        """Absence of rows could be a capture that has not run yet. Calling it
+        `official-closed` is a claim only the calendar can make."""
+
+        source = (REPO / "scripts" / "m9" / "capture_observation.py").read_text(
+            encoding="utf-8"
+        )
+        assert "unobserved" in source
+
+
 class TestTheContractSaysWhatItDoesNotDo:
     def test_it_states_that_strategy_shadow_is_blocked(self):
         """M0 section 9 forbids skipping states, and no candidate is
