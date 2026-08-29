@@ -41,6 +41,8 @@ from broker_terms import (  # noqa: E402
     PROMOTION_MONTHLY_TURNOVER_CAP,
     PUBLISHED_PDF_PATH,
     PUBLISHED_PDF_SHA256,
+    ACCOUNT_TERMS,
+    PROMOTION_EVIDENCE_PATH_IF_REVISITED,
     REPORTING_DEFAULT_TERMS,
     PROMOTION_OVER_CAP_DISCOUNT,
     REBATE_MECHANICS,
@@ -167,6 +169,39 @@ class TestNoSetClaimsMoreThanItHas:
         assert REPORTING_DEFAULT_TERMS.minimum_commission == Decimal("20")
         assert BrokerTerms().minimum_commission == Decimal("20")
         assert not BrokerTerms().has_rebate
+
+    def test_the_account_terms_are_the_archived_pdf(self):
+        """D20. Not merely the default -- the account's terms.
+
+        No document connects the promotion to this account, and the Owner
+        decided that absence settles it.
+        """
+
+        assert ACCOUNT_TERMS is SINOPAC_PUBLISHED
+        assert not ACCOUNT_TERMS.has_rebate
+
+    def test_the_conservative_direction_is_stated_not_hidden(self):
+        """The account was opened online, which is the promotion's own stated
+        condition, so pricing at the published schedule overstates the
+        economic cost by 4.22 points per round trip.
+
+        Accepted for the direction of the error, but a candidate that fails
+        under these terms may have been stopped by an overstated cost rather
+        than by itself. M0 has to say so.
+        """
+
+        contract = (REPO / "docs" / "m0-project-contract.md").read_text(
+            encoding="utf-8"
+        )
+        assert "刻意保守" in contract
+        assert "4.22" in contract
+
+    def test_the_route_back_is_recorded_with_its_evidentiary_bar(self):
+        """So that "change the basis back" is a stated bar rather than a
+        judgement call made later, when the number would be tempting."""
+
+        assert "monthly statement" in PROMOTION_EVIDENCE_PATH_IF_REVISITED
+        assert "15th" in PROMOTION_EVIDENCE_PATH_IF_REVISITED
 
     def test_m0_names_the_published_schedule_as_the_reporting_basis(self):
         contract = (REPO / "docs" / "m0-project-contract.md").read_text(
@@ -454,7 +489,9 @@ class TestTheContractNamesTheRightBlockers:
         # -- that was checked and returns the published schedule. It is now
         # written as what is actually wanted, with the honest admission that
         # nobody knows whether such a document exists.
-        for phrase in ("連起來的文件", "零股成交證據"):
+        # v1.5.0 (D20): the terms blocker is lifted; only the odd-lot fill
+        # evidence remains, and it was never about fees.
+        for phrase in ("零股成交證據",):
             assert phrase in contract, f"M0 no longer names {phrase} as a blocker"
 
     def test_the_blocker_points_at_something_obtainable(self):

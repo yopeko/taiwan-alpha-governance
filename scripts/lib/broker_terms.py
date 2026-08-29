@@ -135,6 +135,41 @@ SINOPAC_PROMOTIONAL_2026 = BrokerTerms(
 # missing was anyone saying which one was the default.
 REPORTING_DEFAULT_TERMS = SINOPAC_PUBLISHED
 
+# D20, 2026-08-29: the archived PDF is not merely the default, it is the
+# account's terms. No document connects the promotion to this account, and the
+# Owner decided that absence settles it.
+#
+# What that costs, stated because it is a cost and not an improvement: the
+# account was opened online, which is the promotion's own stated condition, so
+# the promotion very likely applies economically. Pricing at the published
+# schedule **overstates the economic cost of a NT$904 round trip by 4.22
+# percentage points** -- 4.67% against 0.44%.
+#
+# Accepted for the direction of the error. Overstating cost makes a candidate
+# harder to pass; it cannot make a strategy without an edge look viable. The
+# reverse is asymmetric: pricing on a promotion that turns out not to apply
+# builds every conclusion on a cost structure that does not exist, and nothing
+# would signal it.
+#
+# So a candidate that fails under these terms may have been stopped by an
+# overstated cost rather than by itself, and that has to be read with the
+# result.
+ACCOUNT_TERMS = SINOPAC_PUBLISHED
+ACCOUNT_TERMS_SETTLED_ON = date(2026, 8, 29)
+
+# The document that would let this be revisited, and it has a predictable
+# date. Per D14/D15 the broker's statement is itemised per fill and names each
+# fill's rebate, so the first month this account trades produces a document
+# connecting it to the promotional terms -- available on the 15th of the
+# following month.
+#
+# Not a blocker. A recorded path, so that "change the basis back" has a stated
+# evidentiary bar rather than becoming a judgement call later.
+PROMOTION_EVIDENCE_PATH_IF_REVISITED = (
+    "the first monthly statement showing itemised rebate lines for this "
+    "account, available on the 15th of the month after it first trades"
+)
+
 # The five odd-lot questions the captured page does not answer, and the
 # answers given on 2026-08-25. Recorded as data because three of them are
 # already load-bearing: the third decides whether a scale-out pays one minimum

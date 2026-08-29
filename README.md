@@ -123,6 +123,7 @@ AlphaMaster 不得直接寫入正式策略、紙上帳本或真實委託；AI �
 - [候選 005 結果：預期對了，理由錯了，而正確的理由前一天就量出來了](docs/evidence/m7-candidate-005-result-2026-08-29.md)
 - [D9 條件 4：可分離重跑，量出廠商依賴值多少](docs/evidence/d9-condition-4-separable-rerun-2026-08-29.md)
 - [M3 Owner 決定 D19：優惠證據封存、報告基準改回牌告（m0-v1.4.0）](docs/evidence/m3-owner-decision-d19-2026-08-29.md)
+- [M3 Owner 決定 D20：以封存 PDF 為準，M10 第一項阻擋解除（m0-v1.5.0）](docs/evidence/m3-owner-decision-d20-2026-08-29.md)
 - [券商牌告 PDF 封存](docs/evidence/broker/sinopac-service-charge-2024-11-28.json)
 - [券商費率頁 2026 優惠逐字封存](docs/evidence/broker/sinopac-fee-page-promotion-2026-08-29.md)
 
