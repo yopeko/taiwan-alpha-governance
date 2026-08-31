@@ -1,0 +1,41 @@
+[project]
+name = "taiwan-alpha-governance"
+version = "0.1.0"
+description = "Governance contracts, evidence documents and reference implementations for a Taiwan-equity research pipeline."
+readme = "README.md"
+requires-python = ">=3.12"
+
+# Only what the environment-independent suite needs. The capture and warehouse
+# scripts need more (see the `capture` extra) and additionally the Taiwan Core
+# checkout, which is not published and not installable -- the tests that need
+# it skip, by design, with the reason printed.
+dependencies = [
+    "pandas>=2.2",
+    "pyarrow>=16",
+]
+
+[project.optional-dependencies]
+# Needed by scripts/m3/* and scripts/audit/*. Those reach the network or a
+# DuckDB store, so they only do anything against the operator's checkout.
+capture = [
+    "requests>=2.31",
+    "duckdb>=1.0",
+    "openpyxl>=3.1",
+]
+dev = [
+    "pytest>=8.0",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+# This repository is not a library. It is a governance record plus two
+# reference implementations that Taiwan Core mirrors byte for byte. The list
+# is explicit so a build cannot guess a layout and quietly ship something else.
+packages = ["m4", "m5"]
+
+# pytest configuration deliberately stays in pytest.ini. Two config sources
+# would let one silently win over the other, and this project has already been
+# bitten once by two documents describing the same thing differently.

@@ -102,8 +102,8 @@ Lane 現為 **17,592 列，ex_date 2019-01-16 .. 2026-08-18**。**未改任何�
 
 | 欄位 | 值 |
 |---|---|
-| 來源機構 | **永豐金證券股份有限公司** |
-| 端點 URL | `https://www.sinotrade.com.tw/newweb/Fee_Rate/?market=S` |
+| 來源機構 | **（發布者身分不公開）** |
+| 端點 URL | `(withheld) publisher fee-rate page` |
 | 擷取日期 | 2026-08-25 |
 | 另存文件 | `Service-charge.pdf`（牌告，標日 2024/11/28，文件本身不含券商名） |
 

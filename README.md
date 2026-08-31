@@ -1,189 +1,145 @@
-# Taiwan Alpha Governance Project
+# Taiwan Alpha Governance
 
-本倉庫保存台股 AlphaMaster 適配工作的治理、架構與跨專案契約，不保存或複製 AlphaMaster 原始碼，也不取代既有 `tw-sepa-screener`。
+**English: [README.en.md](README.en.md)**
+
+一個台股量化研究專案的**治理紀錄**。
+
+這裡沒有一個能賺錢的策略。有價值的東西是另一個：**一整套用來防止自己騙自己的機制**，以及它每一次抓到自己時留下的紀錄。
+
+---
+
+## ⚠️ 先讀這一段
+
+- **這不是投資建議。** 作者不是持牌顧問，這個倉庫也不推薦任何標的、策略或券商。
+- **沒有任何策略通過驗證。** 目前 `validated` 候選為 **0**。封存樣本外資料的**開封次數是 0**。
+- **從未用真錢交易過。** NT$10,000 的 canary 里程碑仍為 `blocked`，而且它被設計成即使解除也只能驗證流程，不能驗證策略——[原因在這裡](docs/m0-project-contract.md#8-nt10000-資金與風險政策)。
+- **資料管線你跑不動。** 它需要授權廠商資料與另一個未公開的倉庫。詳見[能跑什麼](#能跑什麼不能跑什麼)。
+- 過去的回測結果不預測未來。這裡連「過去有效」都還沒成立。
+
+---
+
+## 這個專案在做什麼
+
+用 NT$10,000 驗證一條完整的台股量化流程：官方原始資料 → point-in-time 倉庫 → 交易規則與成本 → 現金／股票帳本 → 候選策略 → 巢狀驗證 → shadow → paper → canary。
+
+**資金額度是刻意的。** 它小到讓每一個成本假設都藏不住：NT$904 的部位，一次來回的手續費與稅是 **4.67%**。任何在這個規模下看起來可行的東西，在別的規模下大概也不是幻覺。
+
+到目前為止，這條流程走到 M7。最實質的研究發現是一個否定結果：
+
+| 排序函式 | Rank IC | t 統計 | NDCG@10 |
+|---|---:|---:|---:|
+| `momentum-12-1` | −0.0080 | −0.56 | 0.3891 |
+| `inverse-volatility-60` | +0.0723 | +3.18 | 0.2962 |
+
+**12-1 動能在這個窗口、這個股票池上的排序能力與零無法區分。** 低波動的整體排序較好，但策略只吃前十名，而前十名是另一回事——這兩件事被同一份報告分開量出來，[量測 001](docs/evidence/rank-quality-001-2026-08-28.md)。
+
+---
+
+## 你可以從這裡學走的東西
+
+資料管線只對台股有用。下面這些跟台股沒有關係，跟任何要「用資料下結論」的工作都有關係。
+
+**封存樣本外是實體切開的，不是自律。** [`split_sealed_dataset.py`](scripts/m7/split_sealed_dataset.py) 產出的開發區檔案裡**根本沒有**封存區那些列。一份缺了那些列的資料集產不出那些結果——這比任何「我保證不看」都可靠。[契約](docs/contracts/nested-validation-contract.md)
+
+**試驗登錄，以及它為什麼存在。** 這個專案精心計數了一個目前是 0 的東西（開封次數），卻完全沒數真正在累積的那個——開發區試驗。發現時已經跑過九次，其中四次是名額掃描然後從中做了選擇，那是多重比較的教科書形狀。**九次未記錄的試驗，比一次記錄在案的開封更值得擔心。**[契約](docs/contracts/trial-ledger-contract.md)
+
+**衡量規模與執行規模分離。** 在 NT$10,000 下產生的報酬數字**不得**作為策略優劣的證據，因為成本佔成交額 2.87%（參考規模 0.38%，差 7.6 倍），而名額拒絕是完成交易的 3,607 倍——這條權益曲線衡量的是「最先出現的訊號」，不是「最好的」。這條規則在看到數字**之前**採納。[ADR-0002](docs/adr/0002-measurement-scale-separate-from-execution-scale.md)
+
+**門檻先寫，再跑。** 每一個候選都有一份帶 git commit 時戳的計畫，計畫裡包含一個**可被否證的預期**。有一次預期被證實了但理由是錯的，那次的紀錄比通過本身有用。[候選 005](docs/evidence/m7-candidate-005-result-2026-08-29.md)
+
+**封鎖條件不得建立在未經檢視的文件內容上。** 「取得載明 Y 的文件 X」這種寫法錯過兩次——兩次 X 都存在，兩次都不載明 Y。正確寫法是「取得並檢視文件 X，確認其是否載明 Y」。[D19](docs/evidence/m3-owner-decision-d19-2026-08-29.md)
+
+**每一份結果文件都有「不能支撐什麼」那一節**，而且通常比「能支撐什麼」長。
+
+---
+
+## 能跑什麼、不能跑什麼
+
+| | 外人 clone 之後 |
+|---|---|
+| **807 個測試** | `tests/unit`、`m4/tests`、`m5/tests` 約 **590 個不需要任何外部資料**，44 秒跑完。其餘需要作業者的倉庫與封存，會**印出理由後 skip**，不會假裝通過。 |
+| **59 支腳本** | **0 支能跑。** 全部指向未公開的 `tw-sepa-screener` 倉庫與授權廠商資料。 |
+| **83 份文件** | 全部可讀。**這是這個倉庫的主體。** |
+
+```bash
+python -m pytest tests/unit m4/tests m5/tests -q
+```
+
+全套 `pytest` 約 25 分鐘（`tests/invariant` 佔絕大部分），開發時用上面那條。
+
+CI 用 `-ra` 逐條印出 skip 了什麼，**目的是讓「這裡驗過」與「只在本機驗過」的界線保持可見，而不是悄悄縮小**。
+
+---
 
 ## 目前狀態
 
-| 里程碑 | 狀態 | 完成日 | 主要產物 |
-|---|---|---|---|
-| M0 證據與市場契約 | complete | 2026-08-02 | [M0 專案契約](docs/m0-project-contract.md) |
-| M1 架構與重用稽核 | complete | 2026-08-02 | [M1 架構與重用稽核](docs/m1-architecture-reuse-audit.md) |
-| M2 官方不可變原始資料 | complete | 2026-08-03 | 36 sources、56 live observations、55 initial accepted + 1 released quarantine、0 unresolved；正式封存與 E: 備份均通過稽核。[M2 closure evidence](docs/evidence/m2-owner-approvals-release-and-durable-audit-2026-08-03.md) |
-| M3 Point-in-time warehouse | complete（附七項已記錄例外）| 2026-08-17 | G0 §5 條件 1、2、3、5 通過，條件 4 部分通過。Validation Owner 已簽核。[Exit review](docs/evidence/m3-8-exit-review-2026-08-17.md)、[M3 計畫](docs/m3-point-in-time-warehouse-plan.md) |
-| M4 台股規則與成本 | complete | 2026-08-19 | 檔位由 406,445 筆官方收盤價實測推導；三種漲跌停皆以官方公布值驗證。參考實作已上游化至 Taiwan Core。[M4 契約](docs/contracts/m4-market-rules-contract.md)、[M4.2 上游化](docs/evidence/m4-2-upstream-to-taiwan-core-2026-08-19.md) |
-| M5 現金／股票帳本 | complete | 2026-08-19 | M0 §6 六項不變量全部以測試強制；手續費折讓於 2026-08-25 實作。[M5 證據](docs/evidence/m5-cash-share-ledger-2026-08-19.md) |
-| M6 AlphaMaster adapter | in progress | - | 帳本驅動器在 1,840 場次的六年窗口跑完；候選報告與對照比較契約落地。第一個被排序的候選已否決。[M6.3](docs/evidence/m6-3-first-ranked-candidate-2026-08-26.md) |
-| M7 巢狀驗證 | in progress | - | 切分方法與封存機制落地（界線 2025-01-01），封存區**開封次數 0**。[巢狀驗證契約](docs/contracts/nested-validation-contract.md) |
+**狀態只有一個來源：[里程碑登錄表](docs/milestone-register.md)。**
 
-本表在 2026-08-28 之前停在 M4 且記為 in progress，而里程碑登錄從 2026-08-19 起就是 complete。兩份文件對同一件事說了九天不同的話。
+這裡以前有一份狀態表，它兩次落後於登錄表——一次落後九天，一次在寫著「兩份文件對同一件事說了九天不同的話」的那段話正下方又發生。**一份狀態不會有兩份說法，所以那份表被刪掉了。**
 
-詳細狀態及退出門檻見 [里程碑登錄表](docs/milestone-register.md)。
+摘要：M0–M6 `complete`，M7 `pending`（前置已解除，封存區未開封），M8／M9／M11 `pending`，M10／M12 `blocked`。
 
-## 已採用的架構決策
+---
 
-`tw-sepa-screener` 是台股資料、Point-in-time、交易規則、帳本、正式策略版本與每日營運的權威系統；AlphaMaster 是候選因子與公式的研究引擎。兩者先保持獨立，以版本化資料集和候選策略封包溝通。完整理由見 [ADR-0001](docs/adr/0001-separate-taiwan-core-and-alphamaster-research.md)。
+## 文件導覽
 
-資料流固定為：
+**[完整索引在 docs/INDEX.md](docs/INDEX.md)**（83 份）。從這三份開始：
+
+1. [M0 專案契約](docs/m0-project-contract.md) — 市場、資金、風險、禁止事項。所有其他文件的前提。
+2. [里程碑登錄表](docs/milestone-register.md) — 現在到哪裡、卡在什麼上面。
+3. [ADR-0001](docs/adr/0001-separate-taiwan-core-and-alphamaster-research.md) — 為什麼研究引擎與正式系統分開。
+
+文件命名本身帶資訊：契約與計畫的日期**早於**它們所規範的執行，那個順序就是「規則不是看到結果才訂的」的證據。
+
+---
+
+## 架構
 
 ```text
 TWSE / TPEx / MOPS
         |
         v
-tw-sepa-screener official and point-in-time core
+tw-sepa-screener  官方與 point-in-time 核心（未公開）
         |
-        | research dataset package (read-only)
+        | 版本化研究資料集（唯讀）
         v
-AlphaMaster research laboratory
+AlphaMaster  研究實驗室（外部，AGPL-3.0）
         |
-        | research-only candidate package
+        | research-only 候選封包
         v
-Taiwan validation and cash-ledger replay
+台股驗證與現金帳本重放
         |
         v
-shadow -> paper -> human-approved canary -> formal
+shadow -> paper -> 人工批准的 canary -> formal
 ```
 
-AlphaMaster 不得直接寫入正式策略、紙上帳本或真實委託；AI 分析不得進入自動評分、升級或下單路徑。
+研究引擎不得直接寫入正式策略、紙上帳本或真實委託；AI 分析不得進入自動評分、升級或下單路徑。[ADR-0001](docs/adr/0001-separate-taiwan-core-and-alphamaster-research.md)
 
-衡量規模與執行規模的分離見 [ADR-0002](docs/adr/0002-measurement-scale-separate-from-execution-scale.md)（**Accepted，2026-08-25**）：M0 §8 的 NT$10,000 與其名額數是執行組態，不是衡量組態；在該規模下產生的報酬數字不得作為策略優劣的證據。其在帳本上的實作見 [M5 手續費折讓變更說明](docs/m5-fee-rebate-change-spec.md)（**已於 2026-08-25 實作**）：券商折讓為先收後退，同一筆成交因而有實扣與淨額兩個成本，應收退款計入 NAV 但不計入購買力。
+---
 
-## 核心契約
+## 這個倉庫**不**包含什麼
 
-- [研究資料集契約](docs/contracts/research-dataset-contract.md)
-- [候選策略封包契約](docs/contracts/strategy-candidate-contract.md)
-- [證據來源登錄表](docs/evidence/source-register.md)
-- [Official Raw Snapshot 契約](docs/contracts/raw-snapshot-contract.md)
-- [M2 官方資料來源清冊](docs/m2-source-inventory.md)
-- [M2 entry baseline](docs/evidence/tw-sepa-baseline-2026-08-02.md)
-- [M2.2 capture foundation evidence](docs/evidence/m2-2-capture-foundation-2026-08-02.md)
-- [M2.3 calendar／master isolated pilot evidence](docs/evidence/m2-3-calendar-master-pilot-2026-08-02.md)
-- [M2.3 daily-price pilot and gap audit](docs/evidence/m2-3-daily-price-pilot-and-gap-audit-2026-08-03.md)
-- [M2.6 exit verification](docs/evidence/m2-6-exit-verification-2026-08-03.md)
-- [M2 三項 Owner 批准決定](docs/evidence/m2-owner-approval-decision-2026-08-03.md)
-- [M2 批准、release、durable archive 與 restore closure](docs/evidence/m2-owner-approvals-release-and-durable-audit-2026-08-03.md)
-- [M2 操作手冊](docs/m2-operations-runbook.md)
-- [M3 Point-in-time warehouse 計畫](docs/m3-point-in-time-warehouse-plan.md)
-- [M3 Point-in-time warehouse 契約](docs/contracts/pit-warehouse-contract.md)
-- [M3 entry baseline](docs/evidence/m3-entry-baseline-2026-08-03.md)
-- [M3 G0 Owner 決定](docs/evidence/m3-g0-owner-decision-2026-08-03.md)
-- [M3.1 Source-to-Table Map、Availability 與 Conflict Policy](docs/contracts/m3-source-to-table-map.md)
-- [M3.1 完成證據：耐久封存與 coverage ledger](docs/evidence/m3-1-coverage-ledger-and-durable-archival-2026-08-16.md)
-- [M3 Owner 決定 D1–D5 與抓取可行性驗證](docs/evidence/m3-owner-decisions-and-capture-feasibility-2026-08-16.md)
-- [TEJ PRO 匯入規格](docs/contracts/tej-import-spec.md)
-- [M3.1b 完成證據：固定期間全量抓取與 ledger v2](docs/evidence/m3-1b-window-capture-2026-08-16.md)
-- [M3.1c TEJ licensed-vendor lane 匯入](docs/evidence/m3-1c-tej-import-2026-08-16.md)
-- [M3 Owner 決定 D6–D8 與市場狀態抓取](docs/evidence/m3-owner-decisions-d6-d8-2026-08-16.md)
-- [M3.1e 公司行動抓取與 coverage ledger v3](docs/evidence/m3-1e-corporate-actions-and-ledger-v3-2026-08-16.md)
-- [M3 G0 修訂 v2.0.0 與決定 D9–D10](docs/evidence/m3-g0-amendment-d9-d10-2026-08-16.md)
-- [M3.1f TPEx 公司行動與 coverage ledger v4](docs/evidence/m3-1f-tpex-actions-and-ledger-v4-2026-08-16.md)
-- [M3.2 Append-only staging](docs/evidence/m3-2-staging-2026-08-16.md)
-- [M3.8 Exit review 與 Validation Owner 簽核](docs/evidence/m3-8-exit-review-2026-08-17.md)
-- [M3.9 公司行動取得公告日期](docs/evidence/m3-9-action-availability-2026-08-18.md)
-- [M3.10 減資公告日與停止買賣日](docs/evidence/m3-10-reduction-announcement-linkage-2026-08-19.md)
-- [M3 Owner 決定 D11：減資 FILE_DATE 的 availability basis](docs/evidence/m3-owner-decision-d11-2026-08-19.md)
-- [M3.11 TPEx 公司行動晉升 canonical 表](docs/evidence/m3-11-tpex-actions-promotion-2026-08-19.md)
-- [M3.12 變更股票面額取得官方來源](docs/evidence/m3-12-par-value-change-2026-08-19.md)
-- [M3.13 上櫃減資與變更股票面額](docs/evidence/m3-13-tpex-reduction-par-value-2026-08-19.md)
-- [M3.14 公司行動接入 as-of 重建](docs/evidence/m3-14-actions-in-asof-2026-08-19.md)
-- [M3.15 合併兩份 corporate_actions_pit](docs/evidence/m3-15-single-action-table-2026-08-19.md)
-- [M4 台股規則與成本契約](docs/contracts/m4-market-rules-contract.md)
-- [M4.1 除權息日漲跌停由官方法規解決](docs/evidence/m4-1-ex-rights-limits-2026-08-19.md)
-- [M4.2 上游化至 Taiwan Core 與指紋異動](docs/evidence/m4-2-upstream-to-taiwan-core-2026-08-19.md)
-- [M5 現金／股票帳本](docs/evidence/m5-cash-share-ledger-2026-08-19.md)
-- [M6 Phase 0：既有 SEPA 回測的誠實成本重算](docs/evidence/m6-phase0-cost-recompute-2026-08-20.md)
-- [M6 Phase 2：凍結研究資料集](docs/evidence/m6-phase2-research-dataset-2026-08-20.md)
-- [M6 Phase 3：帳本驅動的回測](docs/evidence/m6-phase3-ledger-backtest-2026-08-20.md)
-- [稽核：FinMind 免費層日線交叉驗證](docs/evidence/audit-finmind-crossvalidation-2026-08-21.md)
-- [M3 Owner 決定 D9：全額交割的 availability basis](docs/evidence/m3-owner-decision-d9-2026-08-22.md)
-- [M3.16 上櫃公司行動 2019–2023 回補](docs/evidence/m3-16-tpex-actions-2019-2023-2026-08-24.md)
-- [M3.17 六年窗口重建，與它叫醒的三件事](docs/evidence/m3-17-six-year-rebuild-2026-08-25.md)
-- [M3 Owner 決定 D14、D15 與券商條款來源登錄](docs/evidence/m3-owner-decisions-d14-d15-2026-08-25.md)
-- [M6.1 六年窗口重跑：兩個規模，零個策略結論](docs/evidence/m6-1-six-year-rerun-2026-08-25.md)
-- [M3 Owner 決定 D16：M0 §8 風險政策修訂（m0-v1.1.0）](docs/evidence/m3-owner-decision-d16-2026-08-25.md)
-- [候選報告契約](docs/contracts/candidate-report-contract.md)
-- [M6.2 換股可行性：一個在建之前就成立的否定結果](docs/evidence/m6-2-rotation-feasibility-2026-08-26.md)
-- [M6.3 第一個被排序的候選：12-1 動能，否決](docs/evidence/m6-3-first-ranked-candidate-2026-08-26.md)
-- [M3 Owner 決定 D17：M10 阻擋事由改寫與優惠到期處置（m0-v1.2.0）](docs/evidence/m3-owner-decision-d17-2026-08-27.md)
-- [券商條款確認清單](docs/evidence/broker-terms-enquiry-2026-08-27.md)
-- [對照比較契約](docs/contracts/control-comparison-contract.md)
-- [巢狀驗證契約（M7）](docs/contracts/nested-validation-contract.md)
-- [Shadow 觀察契約（M9 前半）](docs/contracts/shadow-observation-contract.md)
-- [試驗登錄契約](docs/contracts/trial-ledger-contract.md)
-- [比較計畫 001：12-1 動能 對 60 日低波動](docs/evidence/m7-comparison-plan-001-2026-08-28.md)
-- [比較 001 結果：兩個候選誰都沒有勝出](docs/evidence/m7-comparison-001-result-2026-08-28.md)
-- [M3 Owner 決定 D18：M6.1 依 D9 結案、M10 阻擋改為可取得的證據（m0-v1.3.0）](docs/evidence/m3-owner-decision-d18-2026-08-28.md)
-- [候選計畫 003：拿掉突破，讓排序第一次獨立被量](docs/evidence/m7-candidate-plan-003-2026-08-28.md)
-- [候選 003 結果：第一次有東西通過門檻，而我的預期被否證了](docs/evidence/m7-candidate-003-result-2026-08-28.md)
-- [LTR 論文可學項目：可學什麼、怎麼落地](docs/evidence/ltr-paper-learnings-2026-08-28.md)
-- [排名品質量測 001：動能的排序能力與零無法區分](docs/evidence/rank-quality-001-2026-08-28.md)
-- [候選計畫 004：把停損從常數改成波動的函數](docs/evidence/m7-candidate-plan-004-2026-08-28.md)
-- [候選計畫 004b：拿掉我自己加的兩個夾子](docs/evidence/m7-candidate-plan-004b-2026-08-28.md)
-- [候選 004b 結果：誰都沒有通過，而計畫要求的那一欄把比較本身推翻了](docs/evidence/m7-candidate-004b-result-2026-08-28.md)
-- [候選計畫 005：把唯一有排序能力的東西裝上唯一有效的進場規則](docs/evidence/m7-candidate-plan-005-2026-08-28.md)
-- [候選 005 結果：預期對了，理由錯了，而正確的理由前一天就量出來了](docs/evidence/m7-candidate-005-result-2026-08-29.md)
-- [D9 條件 4：可分離重跑，量出廠商依賴值多少](docs/evidence/d9-condition-4-separable-rerun-2026-08-29.md)
-- [M3 Owner 決定 D19：優惠證據封存、報告基準改回牌告（m0-v1.4.0）](docs/evidence/m3-owner-decision-d19-2026-08-29.md)
-- [M3 Owner 決定 D20：以封存 PDF 為準，M10 第一項阻擋解除（m0-v1.5.0）](docs/evidence/m3-owner-decision-d20-2026-08-29.md)
-- [券商牌告 PDF 封存](docs/evidence/broker/sinopac-service-charge-2024-11-28.json)
-- [券商費率頁 2026 優惠逐字封存](docs/evidence/broker/sinopac-fee-page-promotion-2026-08-29.md)
+- **授權廠商資料。** TEJ 匯出檔從未進入版本控制，`.gitignore`、pre-commit hook 與 CI 三道各自獨立地擋著。
+- **券商條款原件。** 條款本身、雜湊與出處都在[這裡](docs/evidence/broker-terms-provenance-2026-08-29.md)，原件不公開——它與開戶時間合起來是一份個人理財側寫。那份文件同時寫明**這造成的證據降級有多大**。
+- **AlphaMaster 的程式碼。** 它是 AGPL-3.0 的外部倉庫，這裡不 vendor 它，一條不變量測試在盯。
+- **真實帳戶資料。** 沒有帳號、沒有委託、沒有成交。
 
-## 已凍結的 M0 基線
+---
 
-- 市場：TWSE 與 TPEx 普通股；其他商品必須另立契約。
-- 頻率：收盤後日線研究與低頻決策。
-- 起始資金：NT$10,000，僅作流程驗證資金。
-- 部位：只做多、現股、**最多十檔**（`m0-v1.1.0`，原為兩檔）、單檔上限 45%、保留至少 10% 現金、**總開放風險上限 7.50% NAV**（原 2.00%）。名額不是獨立參數，它等於總開放風險除以單筆 0.75%，見 [D16](docs/evidence/m3-owner-decision-d16-2026-08-25.md)。
-- 禁止：融資、槓桿、放空、借券、當沖及未經批准的自動下單。
-- 策略：`research-sandbox`、`challenger`、`formal` 分離；目前沒有獲准的真實資金正式策略。
-- 升級：只能按 `idea -> research -> validated -> shadow -> paper -> canary -> formal` 前進，不得跳級。
+## 關於 issue 與 PR
 
-## M2 完成結果與 M3 邊界
+**Issue 歡迎**，尤其是方法上的：某個門檻設計有問題、某條推理跳步、某個對照組缺了。這個專案的價值就在於被人挑出錯，而它自己抓自己已經抓到極限了。
 
-M2 已完成：36 個 endpoint-level P0 sources 各有唯一 offline parser；56 個 hash-verified observations 全部 parsed。不可變初始決定仍正確保留為 55 accepted、1 quarantined；`TWSE-ACTIONS-HIST` 另有唯一且可驗證的人工 `released` event，因此 unresolved quarantine 為 0。每日股價舊稱「94 天缺口」已修正為 96 天 full-market repair scope，96/96 完成隔離 raw／parse／quality shadow，且正式 DuckDB、legacy raw 與 stock master 前後 hash 相同。
+**PR 大部分不會被合併，原因是結構性的**：
 
-正式 durable archive 位於 `C:\project\tw-sepa-screener\data\raw_v2\m2_2026-08-03`，E: 分離 volume 備份位於 `E:\tw-sepa-screener-backup\raw_v2\m2_2026-08-03`；兩份逐檔雜湊相同且 archive audit 均為 `passed`，另完成一次新目錄 restore drill。OS 權限未能證明 C:／E: 位於不同實體裝置，因此不把它宣稱為 off-device backup。M3 只獲准唯讀使用與建立 shadow／normalized dataset；尚未獲准覆寫正式 DuckDB、legacy raw、stock master、策略或交易設定。
+- `docs/` 下的契約與 evidence 是一份**有簽核人的紀錄**，不是共同編輯的 wiki。決定由單一 Product Owner 作成並帶版號，外部 PR 改動它會讓「誰在何時決定了什麼」失去意義。
+- `m4/rules.py` 與 `m5/ledger.py` 是另一個倉庫的逐位元鏡像，只改這一側會被 `test_upstream_parity.py` 擋下。修正請開 issue 說明，改動要從上游進。
+- 錯字、連結失效、測試本身的 bug——這些直接發 PR，會合併。
 
-M2 只能建立官方不可變原始資料層及其追溯驗收。M0/M1/M2 不授權：
+---
 
-- 修改既有正式或紙上策略；
-- 合併 AlphaMaster PR #1；
-- 連接券商下單；
-- 使用 NT$10,000 進行真實交易；
-- 將任何 AlphaMaster 因子宣稱為已驗證台股策略。
+## 授權
 
-## M3 完成狀態（2026-08-17）
+[Apache License 2.0](LICENSE)。
 
-M3.0 至 M3.8 全部 `complete`，Validation Owner 已於 2026-08-17 簽核。完整核對見 [Exit review](docs/evidence/m3-8-exit-review-2026-08-17.md)。
-
-**Coverage ledger v4**（1,160 個 market-date）：
-
-| State | 嚴格（僅官方）| 依 G0 v2.0.0 D9（含授權廠商）|
-|---|---:|---:|
-| `supported` | 0 | **764** |
-| `not-session` | 396 | 396 |
-| `partial` | 764 | **0** |
-| `unknown` | 0 | **0** |
-
-**G0 §5 退出條件**：條件 1、2、3、5 全部通過；**條件 4 部分通過**——生命週期、價格、市場狀態、財報四族符合 PIT 規則，公司行動不符。
-
-**M3.7 驗證**：五項全 `passed`。staging 與三組 canonical 表重建逐檔一致；restore drill 163 檔相同；受保護 stores 未變動；legacy 逐日列數**零差異**（2025-01-02、2025-10-17、2026-08-03 各 1,878／1,920／1,982 完全相符）。
-
-**M3.6 as-of 介面**：18 項 anti-lookahead 測試通過，含 knowability 述詞、限制單調性、fail-closed 與決定性。
-
-### 七項已記錄例外
-
-| # | 例外 |
-|---|---|
-| 1 | ~~TWT49U 無公告日期~~ **2026-08-18 大幅解除**：2,279/2,388（95.4%）取得公告日，as-of 可見度由 0 升至 2,279；餘 109 筆 TEJ 未涵蓋 |
-| 2 | TPEx 公司行動尚未晉升 canonical 表 |
-| 3 | TEJ 去重鍵為 `(market, symbol)`，代號重用被合併 |
-| 4 | 停牌依 D8 價格缺漏推定，非官方證據 |
-| 5 | 34 個來源無 quality policy，停在 `gated-parse-only` |
-| 6 | 34 檔證券因來源缺市場別被拒 |
-| 7 | 2025 年官方行事曆已永久不可得，改依 TEJ |
-
-全部有測試盯著；補上來源時測試會失敗並提醒更新。
-
-### M3 完成不代表
-
-資料可用於正式回測（M4 交易規則、M5 帳本未完成）、production cutover 已批准（仍需 G4）、或 2026-08-04 以後的日期受到承諾。所有 M3 產物仍落在獨立 shadow。
+`m4/rules.py`（台股檔位、三種漲跌停、T+2、零股）與 `m5/ledger.py`（現金／股票帳本）是這個倉庫最可能對別人有用的部分。檔位由 406,445 筆官方收盤價實測推導，漲跌停三種情形皆以官方公布值驗證。兩者是另一個倉庫的逐位元鏡像，[一條測試](tests/invariant/test_upstream_parity.py)保證它們不會分岔。

@@ -28,7 +28,7 @@ Owner 裁決乙加丙。
 
 ## 決定一（乙）：封存優惠的頁面證據
 
-Owner 於 2026-08-29 提供費率頁截圖，內容逐字封存於[此](broker/sinopac-fee-page-promotion-2026-08-29.md)。
+Owner 於 2026-08-29 提供費率頁截圖，內容逐字封存於[此](broker-terms-provenance-2026-08-29.md)。
 
 ### 它升級了三個項目
 
@@ -97,7 +97,7 @@ D17 與 D18 各犯一次。兩次的後果不同——D17 指向不存在的物�
 ## 相關文件
 
 - [M0 專案契約](../m0-project-contract.md) §7.2、§12（`m0-v1.4.0`）
-- [優惠頁面逐字封存](broker/sinopac-fee-page-promotion-2026-08-29.md)
-- [牌告 PDF 封存](broker/sinopac-service-charge-2024-11-28.pdf)
+- [券商條款出處](broker-terms-provenance-2026-08-29.md)
+- [券商條款出處](broker-terms-provenance-2026-08-29.md)
 - [D17](m3-owner-decision-d17-2026-08-27.md)、[D18](m3-owner-decision-d18-2026-08-28.md)
 - [ADR-0002 §2](../adr/0002-measurement-scale-separate-from-execution-scale.md)：最低額是決定性條款

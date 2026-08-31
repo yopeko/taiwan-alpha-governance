@@ -1065,7 +1065,7 @@ def candidate_report(results: dict[str, dict[str, Any]]) -> tuple[list[dict], di
             # Whether these terms were in force for the window they priced.
             # Undated for the research defaults, which belong to no broker and
             # therefore to no date range. It matters for a real schedule: the
-            # SinoPac promotion runs for 2026 and the dataset starts in 2019,
+            # The 2026 promotion runs for that year and the dataset starts in 2019,
             # so pricing the whole window on it is a claim about a period the
             # terms did not govern -- fair to ask, not fair to leave unsaid.
             "effective_from": (

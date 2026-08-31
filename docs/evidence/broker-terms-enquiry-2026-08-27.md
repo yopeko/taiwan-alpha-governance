@@ -2,7 +2,7 @@
 
 **用途：拿去向券商取得書面確認。** 依 [D17](m3-owner-decision-d17-2026-08-27.md) 授權，執行屬 Execution Owner。
 
-對象：永豐金證券股份有限公司（現行來源，`https://www.sinotrade.com.tw/newweb/Fee_Rate/?market=S`，擷取日 2026-08-25）。同一份清單可用於比較其他券商。
+對象：（發布者身分不公開）（現行來源，`(withheld) publisher fee-rate page`，擷取日 2026-08-25）。同一份清單可用於比較其他券商。
 
 ## 0. 先讀這一段：只有一個條款是決定性的
 

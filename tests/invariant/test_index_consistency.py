@@ -21,6 +21,11 @@ EVIDENCE = DOCS / "evidence"
 PLAN = DOCS / "m3-point-in-time-warehouse-plan.md"
 REGISTER = DOCS / "milestone-register.md"
 README = REPO / "README.md"
+README_EN = REPO / "README.en.md"
+# The catalogue moved out of README on 2026-09-01, when README became an
+# entry point for readers who have never seen this project. Nothing became
+# an orphan: it moved here, and this file still checks it.
+INDEX = DOCS / "INDEX.md"
 
 # Data exports that accompany a narrative document rather than standing alone.
 EVIDENCE_EXEMPT = {".csv", ".json", ".txt"}
@@ -29,7 +34,7 @@ EVIDENCE_EXEMPT = {".csv", ".json", ".txt"}
 def index_text() -> str:
     return "\n".join(
         path.read_text(encoding="utf-8")
-        for path in (README, PLAN, REGISTER)
+        for path in (README, README_EN, INDEX, PLAN, REGISTER)
         if path.is_file()
     )
 
@@ -122,16 +127,49 @@ def test_no_index_narrative_contradicts_a_completed_milestone():
     The status table and the narrative section are edited separately, so they
     drift apart exactly when a milestone lands. This caught README describing
     M3 conditions 4-5 as "not yet started" after they had both passed.
+
+    Read against the register rather than README since 2026-09-01: README no
+    longer carries a status table, because carrying one was the defect. It had
+    fallen behind the register twice, the second time inside the paragraph
+    describing the first time.
     """
 
-    if not README.is_file():
-        pytest.skip("README not present")
-    text = README.read_text(encoding="utf-8")
-    if "| M3 Point-in-time warehouse | complete" not in text:
+    if not (REGISTER.is_file() and README.is_file()):
+        pytest.skip("indexes not present")
+    if "| M3 Point-in-time warehouse | `complete`" not in REGISTER.read_text(
+        encoding="utf-8"
+    ):
         pytest.skip("M3 not marked complete")
+    text = README.read_text(encoding="utf-8")
     stale = [
         phrase
         for phrase in ("條件 4–5 尚未開始", "尚未開始", "倉庫未驗", "抓取階段結束")
         if phrase in text
     ]
     assert not stale, f"README still describes finished M3 work as pending: {stale}"
+
+
+def test_readme_does_not_reintroduce_a_second_status_table():
+    """The defect this guards against has happened twice.
+
+    A milestone status table in README is a second spokesman for something the
+    register already states, and the two drift apart precisely when a milestone
+    lands -- which is when a reader is most likely to be looking. Point at the
+    register instead; do not re-add rows here.
+    """
+
+    if not README.is_file():
+        pytest.skip("README not present")
+    for path in (README, README_EN):
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8")
+        offenders = [
+            line
+            for line in text.splitlines()
+            if line.startswith("| M") and ("complete" in line or "in progress" in line)
+        ]
+        assert not offenders, (
+            f"{path.name} carries milestone status rows again: {offenders[:2]}. "
+            "The register is the only source of status."
+        )

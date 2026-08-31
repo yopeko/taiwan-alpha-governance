@@ -16,10 +16,11 @@ jobs:
           python-version: "3.12"
 
       - name: Install test dependencies
-        # The suite needs pyarrow and pandas for the lane assertions; the
-        # Taiwan Core package itself is not installable here, so the tests
-        # that need it skip by design.
-        run: python -m pip install --quiet pytest pyarrow pandas
+        # From pyproject.toml, so CI and a newcomer install the same set. The
+        # `capture` extra is deliberately not installed: those scripts need the
+        # Taiwan Core checkout, which does not exist here, so the tests that
+        # reach for it skip by design and say so.
+        run: python -m pip install --quiet -e ".[dev]"
 
       - name: Run the environment-independent suite
         env:
@@ -36,5 +37,30 @@ jobs:
         run: |
           if git ls-files | grep -qiE '\.zip$'; then
             echo "A .zip is tracked. Licensed vendor exports must not be committed."
+            exit 1
+          fi
+
+      - name: Fail if private evidence was committed
+        run: |
+          if git ls-files | grep -qE '^private/'; then
+            echo "A file under private/ is tracked. Private evidence must not be committed."
+            exit 1
+          fi
+
+      - name: Fail if the broker is named anywhere in the tree
+        # The archive is private; the identity must not leak back in through a
+        # filename, an identifier or a source URL.
+        #
+        # m4/rules.py and m5/ledger.py are excluded and that is a hole, not a
+        # decision that it is fine. They are byte-identical mirrors of Taiwan
+        # Core -- an invariant test asserts it -- so editing them here alone
+        # would break the mirror, and editing them upstream was declined on
+        # 2026-09-01 because that checkout had uncommitted work. Recorded as
+        # outstanding item 1 in docs/evidence/broker-terms-provenance-2026-08-29.md,
+        # with the fix. Remove this exclusion once the upstream change lands.
+        run: |
+          if git grep -qiE 'sinopac|sinotrade|永豐' -- . ':!.github/workflows/ci.yml' ':!m4/rules.py' ':!m5/ledger.py'; then
+            echo "The broker is named in a tracked file. See docs/evidence/broker-terms-provenance-2026-08-29.md."
+            git grep -inE 'sinopac|sinotrade|永豐' -- . ':!.github/workflows/ci.yml' ':!m4/rules.py' ':!m5/ledger.py'
             exit 1
           fi

@@ -25,6 +25,7 @@ day it expires. It is that nobody notices.
 
 from __future__ import annotations
 
+import json
 import sys
 from datetime import date
 from decimal import Decimal
@@ -49,15 +50,38 @@ from broker_terms import (  # noqa: E402
     ODD_LOT_BILLING,
     ODD_LOT_BILLING_EVIDENCE,
     PROMOTION_EXPIRES,
-    SINOPAC_PROMOTIONAL_2026,
-    SINOPAC_PUBLISHED,
-    SOURCE_URL,
+    BROKER_PROMOTIONAL_2026,
+    BROKER_PUBLISHED,
+    SOURCE_REF,
 )
 from m4.rules import Side, terms_cover, trade_costs  # noqa: E402
 
 DECISION_RECORD = (
     REPO / "docs" / "evidence" / "m3-owner-decisions-d14-d15-2026-08-25.md"
 )
+
+# The archived schedule is kept out of version control: together with the
+# account-opening date it is a personal financial profile. Its sha256 is
+# published in docs/evidence/broker-terms-provenance-2026-08-29.md, so the
+# claims below stay checkable by anyone who fetches the document -- but only
+# the operator can run these particular assertions, so they skip elsewhere
+# rather than fail. Same rule as the Taiwan Core guard in conftest.
+PRIVATE_EVIDENCE = REPO / "private" / "broker-evidence"
+ARCHIVED_TEXT = PRIVATE_EVIDENCE / "published-service-charge-2024-11-28.txt"
+ARCHIVED_META = PRIVATE_EVIDENCE / "published-service-charge-2024-11-28.json"
+ARCHIVED_PAGE = PRIVATE_EVIDENCE / "published-fee-page-promotion-2026-08-29.md"
+
+
+def archived(path):
+    """The archived bytes, or a skip that says where they went."""
+
+    if not path.is_file():
+        pytest.skip(
+            f"{path.name} is private evidence and is not published; see "
+            "docs/evidence/broker-terms-provenance-2026-08-29.md for its "
+            "hash and for what it states"
+        )
+    return path.read_text(encoding="utf-8")
 
 # The window the research dataset covers. Named here so the assertion below
 # reads as the claim it is making rather than as two magic dates.
@@ -68,8 +92,8 @@ class TestTheNumbersMatchTheSourceRegister:
     """One copy is data, the other is the record. They have to agree."""
 
     def test_the_published_schedule_is_what_was_captured(self):
-        assert SINOPAC_PUBLISHED.commission_rate == Decimal("0.001425")
-        assert SINOPAC_PUBLISHED.minimum_commission == Decimal("20")
+        assert BROKER_PUBLISHED.commission_rate == Decimal("0.001425")
+        assert BROKER_PUBLISHED.minimum_commission == Decimal("20")
 
     def test_the_promotion_is_a_rebate_not_a_discount_at_execution(self):
         """The published wording is charge in full, return on the 15th.
@@ -78,14 +102,14 @@ class TestTheNumbersMatchTheSourceRegister:
         not have for up to 45 days.
         """
 
-        assert SINOPAC_PROMOTIONAL_2026.has_rebate
-        assert SINOPAC_PROMOTIONAL_2026.minimum_commission == Decimal("20")
-        assert SINOPAC_PROMOTIONAL_2026.rebate_minimum_commission == Decimal("1")
-        assert SINOPAC_PROMOTIONAL_2026.rebate_payment_day == 15
+        assert BROKER_PROMOTIONAL_2026.has_rebate
+        assert BROKER_PROMOTIONAL_2026.minimum_commission == Decimal("20")
+        assert BROKER_PROMOTIONAL_2026.rebate_minimum_commission == Decimal("1")
+        assert BROKER_PROMOTIONAL_2026.rebate_payment_day == 15
 
     def test_the_source_register_names_the_same_endpoint(self):
         record = DECISION_RECORD.read_text(encoding="utf-8")
-        assert SOURCE_URL in record
+        assert SOURCE_REF in record
         assert str(CAPTURED_ON) in record
 
 
@@ -96,7 +120,7 @@ class TestNoSetClaimsMoreThanItHas:
         """Upgraded 2026-08-29: the PDF is kept with its bytes and a hash, so
         the claim can be re-checked rather than re-read from a live page."""
 
-        assert SINOPAC_PUBLISHED.evidence_state == "publisher-archived-pdf"
+        assert BROKER_PUBLISHED.evidence_state == "publisher-archived-privately"
 
     def test_the_archived_pdf_is_present_and_unchanged(self):
         """A hash recorded without the file is a claim about nothing."""
@@ -104,7 +128,12 @@ class TestNoSetClaimsMoreThanItHas:
         import hashlib
 
         pdf = REPO / PUBLISHED_PDF_PATH
-        assert pdf.is_file(), f"{PUBLISHED_PDF_PATH} is missing"
+        if not pdf.is_file():
+            pytest.skip(
+                "the archived schedule is private and is not published; its "
+                "sha256 is in docs/evidence/broker-terms-provenance-2026-08-29.md "
+                "so a reader who fetches the document can still check it"
+            )
         assert (
             hashlib.sha256(pdf.read_bytes()).hexdigest() == PUBLISHED_PDF_SHA256
         )
@@ -121,23 +150,28 @@ class TestNoSetClaimsMoreThanItHas:
         checked on 2026-08-29, repeats this same schedule.
         """
 
-        text = (
-            REPO / "docs" / "evidence" / "broker"
-            / "sinopac-service-charge-2024-11-28.txt"
-        ).read_text(encoding="utf-8")
+        text = archived(ARCHIVED_TEXT)
         assert "千分之 1.425（低收 20 元）" in text
         assert "2 折" not in text
         assert "低收 1 元" not in text
 
-    def test_the_archived_pdf_does_not_name_the_broker(self):
-        """So its provenance still rests on the URL it came from, exactly as
-        D14/D15 recorded. Archiving did not change that."""
+    def test_the_archived_schedule_does_not_identify_its_publisher(self):
+        """It never named its own publisher, which is why withholding the
+        URL costs less than it looks like it should: the identity was never
+        in the document, only in where the document was fetched from.
 
-        text = (
-            REPO / "docs" / "evidence" / "broker"
-            / "sinopac-service-charge-2024-11-28.txt"
-        ).read_text(encoding="utf-8")
-        assert "永豐" not in text and "SinoPac" not in text
+        Asserted on the generic corporate suffix rather than on a name,
+        because writing the name here would put back exactly what
+        private/ was created to keep out."""
+
+        meta = json.loads(archived(ARCHIVED_META))
+        assert meta["names_the_broker"] is False
+
+        # And the flag has to agree with the bytes, or it is just a claim about
+        # a claim. "證券商" appears -- in a regulatory citation, naming nobody --
+        # so the check is the corporate-name suffix, which does not.
+        text = archived(ARCHIVED_TEXT)
+        assert "股份有限公司" not in text
 
     def test_the_rebate_clause_the_ledger_models_against_is_in_the_document(self):
         """M5 change spec section 3.4 models the 15th because the wording is
@@ -145,10 +179,7 @@ class TestNoSetClaimsMoreThanItHas:
         receivable is held as long as it possibly could be. That reading now
         has a document rather than a web page."""
 
-        text = (
-            REPO / "docs" / "evidence" / "broker"
-            / "sinopac-service-charge-2024-11-28.txt"
-        ).read_text(encoding="utf-8")
+        text = archived(ARCHIVED_TEXT)
         assert "次月 15 日退回至客戶交割帳戶" in text
         assert "遇假日則提早" in text
 
@@ -164,7 +195,7 @@ class TestNoSetClaimsMoreThanItHas:
 
         from m4.rules import BrokerTerms
 
-        assert REPORTING_DEFAULT_TERMS is SINOPAC_PUBLISHED
+        assert REPORTING_DEFAULT_TERMS is BROKER_PUBLISHED
         assert not REPORTING_DEFAULT_TERMS.has_rebate
         assert REPORTING_DEFAULT_TERMS.minimum_commission == Decimal("20")
         assert BrokerTerms().minimum_commission == Decimal("20")
@@ -177,7 +208,7 @@ class TestNoSetClaimsMoreThanItHas:
         decided that absence settles it.
         """
 
-        assert ACCOUNT_TERMS is SINOPAC_PUBLISHED
+        assert ACCOUNT_TERMS is BROKER_PUBLISHED
         assert not ACCOUNT_TERMS.has_rebate
 
     def test_the_conservative_direction_is_stated_not_hidden(self):
@@ -228,10 +259,7 @@ class TestNoSetClaimsMoreThanItHas:
         """Upgraded by the fee-page transcription, and the archive says which
         parts were upgraded and which were not."""
 
-        archive = (
-            REPO / "docs" / "evidence" / "broker"
-            / "sinopac-fee-page-promotion-2026-08-29.md"
-        ).read_text(encoding="utf-8")
+        archive = archived(ARCHIVED_PAGE)
         assert "2 折 (0.285‰)" in archive
         assert "每筆不足 20 元以 20 元計" in archive
         assert "沒有寫到哪一天" in archive
@@ -241,13 +269,10 @@ class TestNoSetClaimsMoreThanItHas:
         screenshot cannot. The state name says which one this is."""
 
         assert (
-            SINOPAC_PROMOTIONAL_2026.evidence_state
+            BROKER_PROMOTIONAL_2026.evidence_state
             == "publisher-stated-via-owner-screenshot"
         )
-        archive = (
-            REPO / "docs" / "evidence" / "broker"
-            / "sinopac-fee-page-promotion-2026-08-29.md"
-        ).read_text(encoding="utf-8")
+        archive = archived(ARCHIVED_PAGE)
         assert "發布者頁面 → 截圖 → Owner → 轉錄" in archive
 
     def test_an_answer_the_page_is_silent_on_is_owner_supplied(self):
@@ -266,7 +291,7 @@ class TestNoSetClaimsMoreThanItHas:
             side=Side.BUY,
             price=Decimal("50"),
             quantity=18,
-            terms=SINOPAC_PROMOTIONAL_2026,
+            terms=BROKER_PROMOTIONAL_2026,
         )
         assert (
             costs.terms_evidence_state
@@ -359,7 +384,7 @@ class TestTermsKnowWhenTheyWereInForce:
     def test_the_published_schedule_is_undated(self):
         """It is the standing rate; a capture cannot say what it will be."""
 
-        assert terms_cover(SINOPAC_PUBLISHED, *BACKTEST_WINDOW) == "undated"
+        assert terms_cover(BROKER_PUBLISHED, *BACKTEST_WINDOW) == "undated"
 
     def test_the_promotion_covers_only_part_of_the_research_window(self):
         """The claim this whole mechanism exists to make legible.
@@ -370,19 +395,19 @@ class TestTermsKnowWhenTheyWereInForce:
         """
 
         assert (
-            terms_cover(SINOPAC_PROMOTIONAL_2026, *BACKTEST_WINDOW)
+            terms_cover(BROKER_PROMOTIONAL_2026, *BACKTEST_WINDOW)
             == "covers-part-of-window"
         )
 
     def test_a_window_inside_the_promotion_is_fully_covered(self):
         assert (
-            terms_cover(SINOPAC_PROMOTIONAL_2026, date(2026, 3, 1), date(2026, 6, 30))
+            terms_cover(BROKER_PROMOTIONAL_2026, date(2026, 3, 1), date(2026, 6, 30))
             == "covers-window"
         )
 
     def test_a_window_after_the_promotion_is_covered_by_none_of_it(self):
         assert (
-            terms_cover(SINOPAC_PROMOTIONAL_2026, date(2027, 1, 1), date(2027, 6, 30))
+            terms_cover(BROKER_PROMOTIONAL_2026, date(2027, 1, 1), date(2027, 6, 30))
             == "covers-none-of-window"
         )
 
@@ -390,7 +415,7 @@ class TestTermsKnowWhenTheyWereInForce:
 class TestThePromotionExpiryTripwire:
     def test_the_expiry_is_recorded_as_a_date_not_as_a_sentence(self):
         assert PROMOTION_EXPIRES == date(2026, 12, 31)
-        assert SINOPAC_PROMOTIONAL_2026.effective_through == PROMOTION_EXPIRES
+        assert BROKER_PROMOTIONAL_2026.effective_through == PROMOTION_EXPIRES
 
     def test_the_promotion_has_not_expired_unnoticed(self):
         """DELIBERATELY DATED. Goes red on 2027-01-01. Not flaky.
@@ -419,7 +444,7 @@ class TestThePromotionExpiryTripwire:
 
         today = date.today()
         assert today <= PROMOTION_EXPIRES, (
-            f"the SinoPac promotion expired on {PROMOTION_EXPIRES} and today "
+            f"the 2026 promotion expired on {PROMOTION_EXPIRES} and today "
             f"is {today}. The minimum commission is NT$20 again, which takes "
             "the round-trip cost of an M0-sized position from 0.44% to 4.67%. "
             "Read this test's docstring before changing anything."

@@ -22,3 +22,15 @@ desktop.ini
 tej_exports/
 *.xlsx
 *.xls
+
+# 私有證據：內容已檢視、雜湊已公開，但不對外散布。
+# 目前存放券商牌告 PDF 與費率頁封存——它們合起來是一份個人理財側寫
+# （用哪一家券商、何時開戶），而那不是這個專案要公開的東西。
+# docs/evidence/broker-terms-provenance-2026-08-29.md 記錄了雜湊與條款本身，
+# 所以證據鏈是被陳述的，只有原件是私有的。
+private/
+
+# Python 建置殘留
+build/
+dist/
+*.egg-info/

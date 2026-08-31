@@ -1,0 +1,18 @@
+# This project's evidence is hash-verified, and `m4/rules.py` and `m5/ledger.py`
+# must stay byte-identical to their canonical copies in Taiwan Core -- a test
+# asserts it. So line endings are normalised in the repository (LF) and left to
+# the platform on checkout, which is what `core.autocrlf` was already doing.
+#
+# Do not add `eol=lf` here. It was tried on 2026-09-01 and immediately broke the
+# mirror: it rewrote rules.py from CRLF to LF on checkout, 24,902 bytes became
+# 24,274, and the upstream parity test is the only thing that would have caught
+# it. Declaring an intent is not free when something downstream hashes bytes.
+* text=auto
+
+# Archived evidence and vendor exports: byte-exact or they are not evidence.
+*.pdf     binary
+*.zip     binary
+*.xlsx    binary
+*.xls     binary
+*.parquet binary
+*.duckdb  binary

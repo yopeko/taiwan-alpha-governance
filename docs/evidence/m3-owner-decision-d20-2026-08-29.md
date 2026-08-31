@@ -4,7 +4,7 @@
 
 ## 決定
 
-**若不存在把本帳戶與其適用費率連起來的文件，即以[封存的官方收費標準 PDF](broker/sinopac-service-charge-2024-11-28.pdf) 為準。**
+**若不存在把本帳戶與其適用費率連起來的文件，即以[官方收費標準（原件私存）](broker-terms-provenance-2026-08-29.md) 為準。**
 
 依此，**M10 的第一項阻擋解除**。M10 仍為 `blocked`，剩下的是第二項：零股成交證據。
 
@@ -19,11 +19,11 @@
 | 賣出證交稅 | 0.3% | 法定 |
 | 折讓 | **無** | PDF 不含優惠條款 |
 
-[2026 優惠的頁面封存](broker/sinopac-fee-page-promotion-2026-08-29.md)**保留為證據，但不是本帳戶的條款**——沒有任何文件把它連到這個帳戶。
+[2026 優惠頁面（原件私存）](broker-terms-provenance-2026-08-29.md)**保留為證據，但不是本帳戶的條款**——沒有任何文件把它連到這個帳戶。
 
 ## 2. 這使成本模型從「準確」變成「刻意保守」，而那要寫下來
 
-Owner 的開戶是**線上新開戶**，正是優惠頁面載明的適用條件。所以**優惠很可能在經濟上真的適用**，只是沒有文件說。
+本帳戶**很可能滿足**優惠頁面載明的適用條件（帳戶細節不公開，見[券商條款出處](broker-terms-provenance-2026-08-29.md)）。所以**優惠很可能在經濟上真的適用**，只是沒有文件說。
 
 以 NT$904 部位（50 元 × 18 股）計：
 
@@ -75,6 +75,6 @@ D19 決定三：封鎖條件不得建立在未經檢視的文件內容上。
 
 - [M0 專案契約](../m0-project-contract.md) §7.2、§12（`m0-v1.5.0`）
 - [D19](m3-owner-decision-d19-2026-08-29.md)：報告基準改回牌告、封鎖條件通則
-- [牌告 PDF 封存](broker/sinopac-service-charge-2024-11-28.json)
-- [2026 優惠頁面封存](broker/sinopac-fee-page-promotion-2026-08-29.md)
+- [券商條款出處](broker-terms-provenance-2026-08-29.md)
+- [券商條款出處](broker-terms-provenance-2026-08-29.md)
 - [ADR-0002 §2](../adr/0002-measurement-scale-separate-from-execution-scale.md)

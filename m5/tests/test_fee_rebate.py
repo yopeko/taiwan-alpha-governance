@@ -1,6 +1,6 @@
 """The nine checks the M5 fee-rebate change spec owed.
 
-SinoPac's published schedule does not discount at execution. It charges the
+The published schedule does not discount at execution. It charges the
 full commission and returns the difference to the settlement account on the
 15th of the following month, so one fill has two costs: 42 NTD leaves on a 900
 NTD position, and 4 NTD is what it finally cost.
@@ -36,9 +36,9 @@ from m5.ledger import (  # noqa: E402
     plan_position,
 )
 
-# SinoPac's 2026 promotion as published: charged at the standard rate with a
+# The 2026 promotion as published: charged at the standard rate with a
 # NT$20 floor, rebated to the 2-tenths rate with a NT$1 floor on the 15th.
-SINOPAC = BrokerTerms(
+PROMOTIONAL_2026 = BrokerTerms(
     rebate_commission_rate=Decimal("0.000285"),
     rebate_minimum_commission=Decimal("1"),
     rebate_payment_day=15,
@@ -85,7 +85,9 @@ class TestTheTermsRefuseToBeHalfDeclared:
 
 class TestTwoCostsNotOne:
     def test_the_charged_amount_is_what_leaves_at_execution(self):
-        costs = trade_costs(side=Side.BUY, price=PRICE, quantity=18, terms=SINOPAC)
+        costs = trade_costs(
+            side=Side.BUY, price=PRICE, quantity=18, terms=PROMOTIONAL_2026
+        )
         assert costs.commission_charged == 20
         assert costs.commission_net == 1
         assert costs.commission_rebate == 19
@@ -95,7 +97,9 @@ class TestTwoCostsNotOne:
         assert costs.commission == costs.commission_charged
 
     def test_the_tax_is_never_rebated(self):
-        costs = trade_costs(side=Side.SELL, price=PRICE, quantity=18, terms=SINOPAC)
+        costs = trade_costs(
+            side=Side.SELL, price=PRICE, quantity=18, terms=PROMOTIONAL_2026
+        )
         assert costs.tax == 2
         assert costs.commission_rebate == 19
 
@@ -110,10 +114,10 @@ class TestTwoCostsNotOne:
 
 class TestTheDueDateIsTheLatestItCouldBe:
     def test_it_lands_on_the_fifteenth_of_the_following_month(self):
-        assert rebate_due_on(date(2026, 1, 5), SINOPAC) == date(2026, 2, 15)
+        assert rebate_due_on(date(2026, 1, 5), PROMOTIONAL_2026) == date(2026, 2, 15)
 
     def test_december_rolls_into_the_next_year(self):
-        assert rebate_due_on(date(2026, 12, 31), SINOPAC) == date(2027, 1, 15)
+        assert rebate_due_on(date(2026, 12, 31), PROMOTIONAL_2026) == date(2027, 1, 15)
 
     def test_terms_without_a_rebate_have_no_due_date(self):
         assert rebate_due_on(date(2026, 1, 5), BrokerTerms()) is None
@@ -124,7 +128,7 @@ class TestTheReceivableCountsForNavAndNotForBuyingPower:
         ledger = Ledger(
             opening_cash=Decimal("10000"),
             sessions=SESSIONS,
-            terms=SINOPAC,
+            terms=PROMOTIONAL_2026,
             # Zero, so these assertions isolate the rebate. With the default
             # 20 bps the fill price differs from the mark and NAV moves for a
             # reason that has nothing to do with what is being tested.
@@ -140,7 +144,7 @@ class TestTheReceivableCountsForNavAndNotForBuyingPower:
         ledger = Ledger(
             opening_cash=Decimal("10000"),
             sessions=SESSIONS,
-            terms=SINOPAC,
+            terms=PROMOTIONAL_2026,
             # Zero, so these assertions isolate the rebate. With the default
             # 20 bps the fill price differs from the mark and NAV moves for a
             # reason that has nothing to do with what is being tested.
@@ -156,7 +160,7 @@ class TestTheReceivableCountsForNavAndNotForBuyingPower:
         ledger = Ledger(
             opening_cash=Decimal("10000"),
             sessions=SESSIONS,
-            terms=SINOPAC,
+            terms=PROMOTIONAL_2026,
             # Zero, so these assertions isolate the rebate. With the default
             # 20 bps the fill price differs from the mark and NAV moves for a
             # reason that has nothing to do with what is being tested.
@@ -171,7 +175,7 @@ class TestPayingItIn:
         ledger = Ledger(
             opening_cash=Decimal("10000"),
             sessions=SESSIONS,
-            terms=SINOPAC,
+            terms=PROMOTIONAL_2026,
             # Zero, so these assertions isolate the rebate. With the default
             # 20 bps the fill price differs from the mark and NAV moves for a
             # reason that has nothing to do with what is being tested.
@@ -185,7 +189,7 @@ class TestPayingItIn:
         ledger = Ledger(
             opening_cash=Decimal("10000"),
             sessions=SESSIONS,
-            terms=SINOPAC,
+            terms=PROMOTIONAL_2026,
             # Zero, so these assertions isolate the rebate. With the default
             # 20 bps the fill price differs from the mark and NAV moves for a
             # reason that has nothing to do with what is being tested.
@@ -208,7 +212,7 @@ class TestPayingItIn:
         ledger = Ledger(
             opening_cash=Decimal("10000"),
             sessions=SESSIONS,
-            terms=SINOPAC,
+            terms=PROMOTIONAL_2026,
             # Zero, so these assertions isolate the rebate. With the default
             # 20 bps the fill price differs from the mark and NAV moves for a
             # reason that has nothing to do with what is being tested.
@@ -240,7 +244,7 @@ class TestSizingUsesTheChargedAmount:
             stop_price=self.STOP,
             open_positions=0,
             settled_cash=self.CASH,
-            terms=SINOPAC,
+            terms=PROMOTIONAL_2026,
         )
         assert not plan.is_trade
         assert plan.reason == "cash-cannot-cover-position-and-charged-commission"
@@ -256,7 +260,7 @@ class TestSizingUsesTheChargedAmount:
 
         spendable = self.CASH - self.NAV * Decimal("0.10")
         costs = trade_costs(
-            side=Side.BUY, price=self.PRICE, quantity=1, terms=SINOPAC
+            side=Side.BUY, price=self.PRICE, quantity=1, terms=PROMOTIONAL_2026
         )
         assert self.PRICE + costs.commission_net <= spendable
         assert self.PRICE + costs.commission_charged > spendable

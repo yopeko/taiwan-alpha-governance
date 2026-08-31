@@ -143,7 +143,7 @@ amount     Decimal
 
 優惠結束當日，磨損由 0.44% 跳回 4.67%（十倍），應收歸零。實作必須讓這是一個**組態變更**而非改程式：`rebate_*` 設為 `None` 即回到牌告行為，測試 #8 守住這條路徑。
 
-**來源已於 2026-08-25 補齊**（見 [D14／D15 決定書](evidence/m3-owner-decisions-d14-d15-2026-08-25.md)）：永豐金證券股份有限公司，`https://www.sinotrade.com.tw/newweb/Fee_Rate/?market=S`，擷取日 2026-08-25。證據狀態由「未具名文件」升為 `publisher-published-rate`——來源機構、端點與擷取日期齊備，但非簽署契約。
+**來源已於 2026-08-25 補齊**（見 [D14／D15 決定書](evidence/m3-owner-decisions-d14-d15-2026-08-25.md)）：（發布者身分不公開），`(withheld) publisher fee-rate page`，擷取日 2026-08-25。證據狀態由「未具名文件」升為 `publisher-published-rate`——來源機構、端點與擷取日期齊備，但非簽署契約。
 
 頁面另有兩處沉默：優惠**未載明截止日**，零股計費規則**未單獨載明**。
 

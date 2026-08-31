@@ -37,4 +37,17 @@ if git diff --cached --name-only | grep -qiE '\.(zip|xlsx|xls)$'; then
   exit 1
 fi
 
+
+
+# Private evidence must never be staged. Same reasoning as the vendor exports
+# above, different reason for privacy: the broker archive is a personal
+# financial profile (which broker, when the account was opened), and a
+# .gitignore is one `git add -f` away from not mattering.
+echo "pre-commit: refusing private evidence"
+if git diff --cached --name-only | grep -qE '^private/'; then
+  echo "pre-commit: a file under private/ is staged." >&2
+  echo "pre-commit: its hash is published in docs/evidence/; the bytes are not." >&2
+  exit 1
+fi
+
 echo "pre-commit: ok"

@@ -93,7 +93,7 @@ M0 §7.2 已將 NT$20 標註為「TWSE 教育案例；**不是所有券商共同
 
 #### 2.1 一份實際的收費表，以及它為什麼把成本拆成兩個數字
 
-來源：**永豐金證券股份有限公司**，`https://www.sinotrade.com.tw/newweb/Fee_Rate/?market=S`，擷取日 **2026-08-25**（登錄見 [D14／D15 決定書](../evidence/m3-owner-decisions-d14-d15-2026-08-25.md)）。另存的牌告 PDF 標日 2024/11/28，文件本身不含券商名。證據狀態 `publisher-published-rate`：來源機構、端點與擷取日期齊備，但非簽署契約。
+來源：**（發布者身分不公開）**，`(withheld) publisher fee-rate page`，擷取日 **2026-08-25**（登錄見 [D14／D15 決定書](../evidence/m3-owner-decisions-d14-d15-2026-08-25.md)）。另存的牌告 PDF 標日 2024/11/28，文件本身不含券商名。證據狀態 `publisher-published-rate`：來源機構、端點與擷取日期齊備，但非簽署契約。
 
 | 來源 | 費率 | 最低收費 |
 |---|---|---|

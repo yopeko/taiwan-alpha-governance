@@ -11,14 +11,19 @@ and the reason it carries `evidence_state` on every set: M0 section 4.2 says
 an assumption must not read as a verified fact, and a Decimal in a source file
 reads as a verified fact unless something next to it says otherwise.
 
-Three evidence states appear here, and they are not interchangeable:
+Four evidence states appear here, and they are not interchangeable:
 
     assumption              M0's research defaults. Nobody's terms.
-    publisher-archived-pdf  The publisher's own document, kept with its bytes
-                            and a hash. Stronger than a reading of a page,
-                            because the artifact can be re-checked. Still not
-                            a signed agreement, and this one does not even
-                            name the broker.
+    publisher-archived-privately
+                            The publisher's own document, kept with its bytes
+                            and a hash -- but kept in `private/`, not here.
+                            The hash is published so a reader who fetches the
+                            document can still check it has not changed; what
+                            they cannot do is find it from this repository.
+                            A real downgrade from the archived-and-published
+                            state, named so it is visible in the type rather
+                            than only in a document. See
+                            docs/evidence/broker-terms-provenance-2026-08-29.md.
     publisher-published-rate  On the broker's own page on a recorded date.
                             Not a signed agreement.
     owner-supplied          The Owner answered a question the page is silent
@@ -42,12 +47,24 @@ sys.path.insert(0, str(REPO))
 
 from m4.rules import BrokerTerms  # noqa: E402
 
-SOURCE_URL = "https://www.sinotrade.com.tw/newweb/Fee_Rate/?market=S"
-SOURCE_INSTITUTION = "永豐金證券股份有限公司"
+# The publisher's own fee-rate page, and the institution that publishes it.
+# Both are withheld here: together with the account-opening date they form a
+# personal financial profile, and this repository publishes the terms, not
+# whose terms they are. The URL and the archive live in `private/`.
+#
+# What withholding costs, stated because it is a cost: provenance for the
+# published schedule rested on the URL (the document does not name its own
+# publisher -- checked, not assumed). With the URL withheld it rests on the
+# sha256 below, which anyone can recompute against the document they fetch
+# themselves. That is weaker for a reader who does not know where to fetch
+# it, and `docs/evidence/broker-terms-provenance-2026-08-29.md` says so.
+SOURCE_REF = "(withheld) publisher fee-rate page"
+SOURCE_INSTITUTION = "(withheld)"
 CAPTURED_ON = date(2026, 8, 25)
 
-# The published schedule, archived 2026-08-29 with its bytes and a hash, at
-# docs/evidence/broker/. Dated 2024-11-28 by the document itself.
+# The published schedule, archived 2026-08-29 with its bytes and a hash, kept
+# at private/broker-evidence/ and deliberately not published. Dated
+# 2024-11-28 by the document itself.
 #
 # What it proves: the standing rate of 1.425 per mille with a NT$20 minimum,
 # and the rebate mechanism -- "charged in full, returned on the 15th of the
@@ -57,7 +74,8 @@ CAPTURED_ON = date(2026, 8, 25)
 #
 # What it does not contain, checked rather than assumed:
 #
-#   the broker's name        (so provenance still rests on the URL)
+#   the broker's name        (so nothing is lost by withholding the URL:
+#                             the document never carried the identity)
 #   the 2026 promotion       (no 2-tenths discount, no NT$1 minimum)
 #   odd-lot commission       ("零股領回 40 元" is a withdrawal service fee,
 #                             not a trading commission)
@@ -71,16 +89,16 @@ PUBLISHED_PDF_SHA256 = (
 )
 PUBLISHED_PDF_DOCUMENT_DATE = date(2024, 11, 28)
 PUBLISHED_PDF_ARCHIVED_ON = date(2026, 8, 29)
-PUBLISHED_PDF_PATH = "docs/evidence/broker/sinopac-service-charge-2024-11-28.pdf"
+PUBLISHED_PDF_PATH = "private/broker-evidence/published-service-charge-2024-11-28.pdf"
 
 # The published schedule. Undated on purpose: it is the standing rate, and
 # what it will be in 2028 is not something the capture can say.
-SINOPAC_PUBLISHED = BrokerTerms(
+BROKER_PUBLISHED = BrokerTerms(
     commission_rate=Decimal("0.001425"),
     minimum_commission=Decimal("20"),
-    evidence_state="publisher-archived-pdf",
+    evidence_state="publisher-archived-privately",
     source=(
-        f"{SOURCE_INSTITUTION} {SOURCE_URL}; archived PDF dated "
+        f"{SOURCE_INSTITUTION} {SOURCE_REF}; archived PDF dated "
         f"{PUBLISHED_PDF_DOCUMENT_DATE}, sha256 {PUBLISHED_PDF_SHA256[:16]}…, "
         f"kept at {PUBLISHED_PDF_PATH}"
     ),
@@ -101,7 +119,7 @@ SINOPAC_PUBLISHED = BrokerTerms(
 # `tests/unit/test_broker_terms_provenance.py` is that something.
 PROMOTION_EXPIRES = date(2026, 12, 31)
 
-SINOPAC_PROMOTIONAL_2026 = BrokerTerms(
+BROKER_PROMOTIONAL_2026 = BrokerTerms(
     commission_rate=Decimal("0.001425"),
     minimum_commission=Decimal("20"),
     rebate_commission_rate=Decimal("0.000285"),
@@ -111,9 +129,9 @@ SINOPAC_PROMOTIONAL_2026 = BrokerTerms(
     effective_through=PROMOTION_EXPIRES,
     evidence_state="publisher-stated-via-owner-screenshot",
     source=(
-        f"{SOURCE_INSTITUTION} {SOURCE_URL}; page transcribed from an Owner "
-        "screenshot 2026-08-29 (docs/evidence/broker/"
-        "sinopac-fee-page-promotion-2026-08-29.md). The end date, odd-lot "
+        f"{SOURCE_INSTITUTION} {SOURCE_REF}; page transcribed from an Owner "
+        "screenshot 2026-08-29 (private/broker-evidence/"
+        "published-fee-page-promotion-2026-08-29.md). The end date, odd-lot "
         "applicability and over-cap tiering remain owner-supplied"
     ),
 )
@@ -133,7 +151,7 @@ SINOPAC_PROMOTIONAL_2026 = BrokerTerms(
 # No code change was needed: `BrokerTerms()` already defaults to the published
 # schedule with no rebate, and all sixteen trials ran under it. What was
 # missing was anyone saying which one was the default.
-REPORTING_DEFAULT_TERMS = SINOPAC_PUBLISHED
+REPORTING_DEFAULT_TERMS = BROKER_PUBLISHED
 
 # D20, 2026-08-29: the archived PDF is not merely the default, it is the
 # account's terms. No document connects the promotion to this account, and the
@@ -154,7 +172,7 @@ REPORTING_DEFAULT_TERMS = SINOPAC_PUBLISHED
 # So a candidate that fails under these terms may have been stopped by an
 # overstated cost rather than by itself, and that has to be read with the
 # result.
-ACCOUNT_TERMS = SINOPAC_PUBLISHED
+ACCOUNT_TERMS = BROKER_PUBLISHED
 ACCOUNT_TERMS_SETTLED_ON = date(2026, 8, 29)
 
 # The document that would let this be revisited, and it has a predictable
