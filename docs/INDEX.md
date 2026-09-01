@@ -90,6 +90,7 @@
 
 ## M7 巢狀驗證、候選與比較
 
+- [診斷 003 結果：7.50% 的間隙是用停損價算的，而成交不在停損價](evidence/m7-diagnostic-003-stop-fill-quality-result-2026-09-01.md)
 - [診斷計畫 003：停損實際成交在哪裡，與設計差多少](evidence/m7-diagnostic-plan-003-stop-fill-quality-2026-09-01.md)
 - [診斷 002 結果：預期成立但理由是錯的，而正確的理由指向政策不指向策略](evidence/m7-diagnostic-002-halt-rules-result-2026-09-01.md)
 - [診斷計畫 002：把 M0 §8.1 的停止規則套上去量一次](evidence/m7-diagnostic-plan-002-halt-rules-2026-09-01.md)
