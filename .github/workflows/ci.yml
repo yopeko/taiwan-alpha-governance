@@ -35,7 +35,22 @@ jobs:
         # tests skip here for want of the warehouse, and -ra prints each
         # one by name -- the split is a speed measure for the commit
         # hook, never a reason for a check to stop being named.
-        run: python -m pytest -q -ra
+        #
+        # Failures are re-emitted as `::error::` annotations. The run log
+        # needs a token to read, and this repository is developed on Windows
+        # while the runner is Linux, so a failure that only happens here has
+        # to be readable from the outside or it gets diagnosed by guesswork.
+        # Three runs were guessed at before this was added.
+        run: |
+          set -o pipefail
+          python -m pytest -q -ra 2>&1 | tee pytest-output.txt || {
+            echo "::error::the suite failed on Linux; the lines below are from pytest"
+            grep -E '^(FAILED|ERROR)' pytest-output.txt | while IFS= read -r line; do
+              echo "::error::$line"
+            done
+            tail -60 pytest-output.txt
+            exit 1
+          }
 
       - name: Fail if a licensed vendor export was committed
         run: |
