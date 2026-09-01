@@ -90,6 +90,7 @@
 
 ## M7 巢狀驗證、候選與比較
 
+- [候選計畫 006：把停損的參考點改成峰值，並把名額收到讓算術成立](evidence/m7-candidate-plan-006-trailing-stop-2026-09-02.md)
 - [診斷 003 結果：7.50% 的間隙是用停損價算的，而成交不在停損價](evidence/m7-diagnostic-003-stop-fill-quality-result-2026-09-01.md)
 - [診斷計畫 003：停損實際成交在哪裡，與設計差多少](evidence/m7-diagnostic-plan-003-stop-fill-quality-2026-09-01.md)
 - [診斷 002 結果：預期成立但理由是錯的，而正確的理由指向政策不指向策略](evidence/m7-diagnostic-002-halt-rules-result-2026-09-01.md)
