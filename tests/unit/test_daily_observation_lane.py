@@ -39,7 +39,7 @@ def staging():
     try:
         import build_staging
     except Exception as exc:  # noqa: BLE001
-        pytest.skip(f"build_staging needs the Taiwan Core package: {exc}")
+        pytest.skip(f"build_staging needs an operator-only module: {exc}")
     return build_staging
 
 

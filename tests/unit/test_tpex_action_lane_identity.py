@@ -31,15 +31,25 @@ sys.path.insert(0, str(REPO / "scripts" / "lib"))
 sys.path.insert(0, str(REPO / "scripts" / "m3"))
 
 
+# Taiwan Core, plus the `capture` extra in pyproject.toml. CI installs only
+# `[dev]`, so a capture script reaches for all of these and finds none.
+OPERATOR_ONLY_MODULES = frozenset(
+    {"tw_sepa_screener", "requests", "duckdb", "openpyxl"}
+)
+
+
 def load(name: str):
     """Load a capture script by path.
 
-    Skips where the module reaches Taiwan Core. Some of these scripts import
-    `tw_sepa_screener` transitively -- `capture_tpex_actions` pulls in
-    `capture_window`, which imports `m2_daily_price_pilot` -- and that package
-    is installed only on the operator's machine. Without this guard the three
-    ledger-summary tests error on any runner, which is what they did on the
-    first two CI runs this repository ever had.
+    Skips where the module reaches something a runner does not have. A capture
+    script pulls in Taiwan Core (`capture_tpex_actions` -> `capture_window` ->
+    `m2_daily_price_pilot`) and `requests`, and CI installs only the `dev`
+    extra -- pytest, pandas, pyarrow. Neither is there.
+
+    A first version of this guard named `tw_sepa_screener` alone and CI failed
+    a fourth time on `requests`, which is the same defect as writing the guard
+    at all: naming one cause of an absent module rather than the class of it.
+    The set below is Taiwan Core plus the `capture` extra from pyproject.toml.
 
     The tests that need no capture script keep running everywhere; that is why
     the guard is here rather than on the module.
@@ -52,8 +62,8 @@ def load(name: str):
     try:
         spec.loader.exec_module(module)
     except ModuleNotFoundError as exc:  # noqa: PERF203
-        if exc.name and exc.name.split(".")[0] == "tw_sepa_screener":
-            pytest.skip(f"{name} needs the Taiwan Core package: {exc}")
+        if exc.name and exc.name.split(".")[0] in OPERATOR_ONLY_MODULES:
+            pytest.skip(f"{name} needs {exc.name}, absent on a runner: {exc}")
         raise
     return module
 
