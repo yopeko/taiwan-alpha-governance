@@ -116,6 +116,7 @@ class TestProhibitionLicensedVendorPassedOffAsOfficial:
 
     LANE = RAW / "m3_tej_licensed_2026-08-16"
 
+    @pytest.mark.needs_local_data
     def test_every_tej_row_is_labelled_licensed_vendor(self):
         if not self.LANE.is_dir():
             pytest.skip("TEJ lane not present on this machine")
@@ -130,6 +131,7 @@ class TestProhibitionLicensedVendorPassedOffAsOfficial:
             checked += 1
         assert checked, "no TEJ normalized table found"
 
+    @pytest.mark.needs_local_data
     def test_tej_import_manifests_never_claim_the_canonical_lane(self):
         if not self.LANE.is_dir():
             pytest.skip("TEJ lane not present on this machine")
@@ -144,6 +146,7 @@ class TestProhibitionSurvivorshipBias:
 
     LANE = RAW / "m3_tej_licensed_2026-08-16"
 
+    @pytest.mark.needs_local_data
     def test_lifecycle_lane_contains_delisted_securities(self):
         if not self.LANE.is_dir():
             pytest.skip("TEJ lane not present on this machine")
@@ -169,6 +172,7 @@ class TestProhibitionSilentlyFilledGaps:
 
     LEDGER = REPO / "docs" / "evidence" / "m3-coverage-summary-2026-08-16-v4.json"
 
+    @pytest.mark.needs_local_data
     def test_coverage_ledger_has_no_silently_dropped_market_dates(self):
         if not self.LEDGER.is_file():
             pytest.skip("coverage summary not present")
@@ -177,6 +181,7 @@ class TestProhibitionSilentlyFilledGaps:
         expected = window["calendar_dates"] * len(("TWSE", "TPEX"))
         assert summary["row_count"] == expected
 
+    @pytest.mark.needs_local_data
     def test_strict_scoring_never_reports_supported_from_vendor_evidence(self):
         if not self.LEDGER.is_file():
             pytest.skip("coverage summary not present")
@@ -230,6 +235,7 @@ class TestProhibitionUndocumentedAdjustedPrices:
         )
 
 
+@pytest.mark.needs_local_data
 def test_no_future_information_leaks_into_an_earlier_cutoff():
     """M0 section 4.3: information may not be used before it was available.
 
@@ -282,6 +288,7 @@ def test_no_future_information_leaks_into_an_earlier_cutoff():
     assert not leaks, f"future-announced status leaked into an earlier cutoff: {leaks[:5]}"
 
 
+@pytest.mark.needs_local_data
 def test_no_impossible_trade_can_settle():
     """M0 section 6: an impossible trade must be impossible in the simulator.
 

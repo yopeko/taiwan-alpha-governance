@@ -57,15 +57,15 @@ The data pipeline is only useful for Taiwan. None of the following is about Taiw
 
 | | After you clone |
 |---|---|
-| **807 tests** | About **590 need nothing external** (`tests/unit`, `m4/tests`, `m5/tests`) and finish in 44 seconds. The rest need the operator's checkout and archives, and **skip with the reason printed** rather than pretending to pass. |
+| **811 tests** | **623 need nothing external and finish in 4 seconds.** The other 188 carry `needs_local_data`: they want the operator's warehouse and archives, and elsewhere they **skip with the reason printed** rather than pretending to pass. |
 | **59 scripts** | **None of them run.** All point at the unpublished `tw-sepa-screener` repository and at licensed vendor data. |
-| **83 documents** | All readable. **They are the substance of this repository.** |
+| **86 documents** | All readable. **They are the substance of this repository.** |
 
 ```bash
-python -m pytest tests/unit m4/tests m5/tests -q
+python -m pytest -q -m "not needs_local_data"
 ```
 
-The full `pytest` run takes about 25 minutes (`tests/invariant` is nearly all of it); use the command above while working.
+That is also the lane the pre-commit hook runs. Drop the `-m` filter for everything; on a machine with the data that takes minutes, and the five slowest tests are 388s, 123s, 49s, 47s and 45s -- every one of them reading local data.
 
 CI runs with `-ra` so every skip is listed by name. The point is to keep the boundary between "checked here" and "checked only on one machine" visible, rather than letting it quietly shrink.
 
@@ -83,7 +83,7 @@ In short: M0–M6 `complete`, M7 `pending` (prerequisites cleared, seal unopened
 
 ## Finding your way around
 
-**[The full index is docs/INDEX.md](docs/INDEX.md)** (83 documents). Start with three:
+**[The full index is docs/INDEX.md](docs/INDEX.md)** (86 documents). Start with three:
 
 1. [M0 project contract](docs/m0-project-contract.md) — market, capital, risk, prohibitions. Everything else presupposes it.
 2. [Milestone register](docs/milestone-register.md) — where the work is and what it is stuck on.

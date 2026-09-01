@@ -11,6 +11,7 @@
 
 ## M0–M1 契約與架構
 
+- [Owner 決定 D21：名額的第二個耦合寫進 M0 §8（m0-v1.6.0）](evidence/m3-owner-decision-d21-2026-09-01.md)
 - [ADR-0001](adr/0001-separate-taiwan-core-and-alphamaster-research.md)
 - [ADR-0002](adr/0002-measurement-scale-separate-from-execution-scale.md)
 - [M0 專案契約](m0-project-contract.md)
@@ -88,6 +89,7 @@
 
 ## M7 巢狀驗證、候選與比較
 
+- [對照計畫 001：隨機選股，M0 §9.1 從未被滿足的那一欄](evidence/m7-control-plan-001-random-selection-2026-09-01.md)
 - [候選報告契約](contracts/candidate-report-contract.md)
 - [對照比較契約](contracts/control-comparison-contract.md)
 - [巢狀驗證契約（M7）](contracts/nested-validation-contract.md)
@@ -107,6 +109,7 @@
 
 ## M9 Shadow 觀察
 
+- [M9：擷取排程之前量到的來源落後，與由此加上的拒絕](evidence/m9-observation-source-staleness-2026-09-01.md)
 - [Shadow 觀察契約（M9 前半）](contracts/shadow-observation-contract.md)
 
 ## 券商條款與成本證據

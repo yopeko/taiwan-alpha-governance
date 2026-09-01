@@ -25,6 +25,14 @@ from warehouse import (  # noqa: E402
     RESEARCH_DATASET_PRICES,
 )
 
+# Every test here reads the operator's frozen research dataset, so all of them
+# skip without it -- and with it, they are part of where the suite's 25
+# minutes go. `pytest -m "not needs_local_data"` is the lane the pre-commit
+# hook runs, because a hook slow enough to be bypassed is a hook that gets
+# bypassed.
+pytestmark = pytest.mark.needs_local_data
+
+
 WAREHOUSE_PRICES = RESEARCH_DATASET_PRICES / "daily_prices_pit.parquet"
 
 

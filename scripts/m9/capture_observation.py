@@ -58,6 +58,11 @@ def observe(session: str, prices_root: Path, status_root: Path) -> dict[str, Any
         ],
     ).to_pylist()
     today = [row for row in prices if row["session_date"] == session]
+    # How far the source actually reaches. An empty `today` has two causes
+    # that look identical in the output and are not the same thing at all:
+    # the market was closed, or the table stops before this date. Only the
+    # first is an observation; the second is a table with nothing to say.
+    latest_in_source = max((row["session_date"] for row in prices), default="")
 
     session_states: dict[str, str] = {}
     for market in MARKETS:
@@ -96,6 +101,7 @@ def observe(session: str, prices_root: Path, status_root: Path) -> dict[str, Any
             "prices": str(prices_root),
             "status": str(status_root),
         },
+        "latest_session_in_source": latest_in_source,
         "reading_note": (
             "Captured on the session date. The same code run later would "
             "produce a reconstruction, not an observation, and the contract's "
@@ -134,6 +140,30 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     payload = observe(session, args.prices_root, args.status_root)
+
+    # An observation of a session the source does not reach is empty, and an
+    # empty observation diverges from nothing, so it counts towards the 60
+    # while measuring nothing. That is the exact failure this file's docstring
+    # was written against, arriving through the other door: not a
+    # reconstruction wearing an observation's name, but a blank one.
+    #
+    # Found on 2026-09-01, before scheduling anything: the warehouse's last
+    # session was 2026-08-03 and the date was 2026-09-01, so every run would
+    # have produced the same empty file and the count would have climbed.
+    #
+    # The two causes of an empty day are told apart by the source's own reach.
+    # Behind it, the market may simply have been closed, and that is a real
+    # observation. Past it, there is nothing to observe.
+    latest = payload["latest_session_in_source"]
+    if latest and session > latest and not args.backfill_unusable:
+        raise SystemExit(
+            f"the price table stops at {latest} and the session is {session}, "
+            f"so there is nothing from that day to observe. Every field would "
+            f"be empty and the observation would still count towards the 60. "
+            f"Rebuild the warehouse through {session} first, or pass "
+            f"--backfill-unusable to inspect the format."
+        )
+
     if args.backfill_unusable:
         payload["unusable"] = (
             "captured after the session date; a reconstruction, not an "

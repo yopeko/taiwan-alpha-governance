@@ -244,6 +244,120 @@ class TestAnObservationHasToBeMadeOnTheDay:
         assert "unobserved" in source
 
 
+class TestAnEmptyObservationIsNotAnObservation:
+    """The other door into the failure the capture side was built to close.
+
+    `capture_observation` refuses a session that is not today, because a file
+    written later is a reconstruction. It did not refuse a session the source
+    table does not reach -- and that file is empty, diverges from nothing,
+    and counts towards the 60 exactly like a good one.
+
+    Measured on 2026-09-01, before anything was scheduled: the warehouse's
+    last session was 2026-08-03 and the date was 2026-09-01. A daily task
+    registered that day would have written the same empty file every evening
+    and the count would have climbed to 60 on nothing at all.
+    """
+
+    @staticmethod
+    def _prices(root, sessions):
+        pq = pytest.importorskip("pyarrow.parquet")
+        pa = pytest.importorskip("pyarrow")
+        root.mkdir(parents=True, exist_ok=True)
+        rows = {
+            "market": ["TWSE"] * len(sessions),
+            "symbol": ["2330"] * len(sessions),
+            "session_date": list(sessions),
+            "open": [100.0] * len(sessions),
+            "high": [101.0] * len(sessions),
+            "low": [99.0] * len(sessions),
+            "close": [100.5] * len(sessions),
+            "volume": [1000] * len(sessions),
+        }
+        pq.write_table(pa.table(rows), root / "daily_prices_pit.parquet")
+        return root
+
+    def test_a_session_past_the_end_of_the_source_is_refused(self, tmp_path):
+        sys.path.insert(0, str(REPO / "scripts" / "m9"))
+        import capture_observation
+
+        from datetime import date
+
+        prices = self._prices(tmp_path / "prices", ["2026-08-03"])
+        with pytest.raises(SystemExit) as caught:
+            capture_observation.main(
+                [
+                    "--out",
+                    str(tmp_path / "o.json"),
+                    "--session",
+                    date.today().isoformat(),
+                    "--prices-root",
+                    str(prices),
+                    "--status-root",
+                    str(prices),
+                ]
+            )
+        message = str(caught.value)
+        assert "2026-08-03" in message
+        assert "nothing from that day to observe" in message
+
+    def test_the_refusal_says_the_empty_file_would_still_have_counted(
+        self, tmp_path
+    ):
+        """Refusing without saying why invites the reader to pass the flag."""
+
+        sys.path.insert(0, str(REPO / "scripts" / "m9"))
+        import capture_observation
+
+        from datetime import date
+
+        prices = self._prices(tmp_path / "prices", ["2026-08-03"])
+        with pytest.raises(SystemExit) as caught:
+            capture_observation.main(
+                [
+                    "--out",
+                    str(tmp_path / "o.json"),
+                    "--session",
+                    date.today().isoformat(),
+                    "--prices-root",
+                    str(prices),
+                    "--status-root",
+                    str(prices),
+                ]
+            )
+        assert "would still count towards the 60" in str(caught.value)
+
+    def test_a_closed_market_inside_the_source_is_still_observable(self, tmp_path):
+        """The distinction the refusal turns on.
+
+        A day with no rows *behind* the source's last session is a market that
+        was closed, and observing that is the point. Refusing it too would
+        make every holiday a gap in the count.
+        """
+
+        sys.path.insert(0, str(REPO / "scripts" / "m9"))
+        import capture_observation
+
+        prices = self._prices(tmp_path / "prices", ["2026-08-03", "2026-08-05"])
+        out = tmp_path / "o.json"
+        rc = capture_observation.main(
+            [
+                "--out",
+                str(out),
+                "--session",
+                "2026-08-04",
+                "--prices-root",
+                str(prices),
+                "--status-root",
+                str(prices),
+                "--backfill-unusable",
+            ]
+        )
+        assert rc == 0
+        payload = json.loads(out.read_text(encoding="utf-8"))
+        assert payload["session_states"]["TWSE"] == "unobserved"
+        assert payload["latest_session_in_source"] == "2026-08-05"
+
+
 class TestTheContractSaysWhatItDoesNotDo:
     def test_it_states_that_strategy_shadow_is_blocked(self):
         """M0 section 9 forbids skipping states, and no candidate is

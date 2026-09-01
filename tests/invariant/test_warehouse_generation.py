@@ -5,7 +5,11 @@ with the count unchanged from before it. Every M3 invariant file was reading
 the previous generation's scratch directory. Nothing was red, nothing was
 skipped, and nothing had been checked.
 
-These tests are cheap and they are the reason the rest can be trusted. They
+These tests are cheap and they are the reason the rest can be trusted.
+They are therefore **not** marked `needs_local_data`, unlike the M3
+invariant files they guard: excluding them from the fast lane would put
+an unbuilt warehouse back behind a green summary, which is the one
+thing this file exists to prevent. They
 fail rather than skip whenever this machine could have built the warehouse and
 did not, so the two states the summary line cannot tell apart -- everything
 verified, and nothing looked at -- can never both be green.

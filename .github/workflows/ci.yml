@@ -31,6 +31,10 @@ jobs:
         # invariants. -ra lists exactly what skipped, so the boundary between
         # "checked here" and "checked locally" stays visible rather than
         # quietly shrinking.
+        # No marker filter: CI runs both lanes. The `needs_local_data`
+        # tests skip here for want of the warehouse, and -ra prints each
+        # one by name -- the split is a speed measure for the commit
+        # hook, never a reason for a check to stop being named.
         run: python -m pytest -q -ra
 
       - name: Fail if a licensed vendor export was committed

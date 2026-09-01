@@ -29,6 +29,16 @@ sys.path.insert(0, str(REPO / "tests"))
 from conftest import TAIWAN_CORE, require_local_environment  # noqa: E402
 from warehouse import CANDIDATE_REPORT  # noqa: E402
 
+# Every test in this module reads the operator's warehouse or archives, so all
+# of them skip on a machine without them -- and on a machine with them, they
+# are where the suite's 25 minutes go. The marker was declared in
+# tests/conftest.py on 2026-08-17 and nothing used it until 2026-09-01.
+#
+# `pytest -m "not needs_local_data"` is the lane the pre-commit hook runs. A
+# hook slow enough to be bypassed is a hook that gets bypassed, and the value
+# of these checks is zero on the commits where someone passes --no-verify.
+pytestmark = pytest.mark.needs_local_data
+
 REQUIRED_COLUMNS = {
     "scale",
     "opening_cash",

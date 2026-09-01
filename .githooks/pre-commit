@@ -21,9 +21,22 @@ if [ -z "$PYTHON" ]; then
   exit 1
 fi
 
-echo "pre-commit: M0 prohibitions, retry policy, M4 rules and M5 ledger"
-PYTHONPATH="$REPO_ROOT" PYTHONIOENCODING=utf-8 \
-  "$PYTHON" -m pytest tests/unit tests/invariant m4/tests m5/tests -q --no-header
+# Everything that does not read the operator's warehouse or archives.
+#
+# Measured 2026-09-01: this lane is 4 seconds. The same files without the
+# marker filter are 247. The five slowest tests in the suite are 388s, 123s,
+# 49s, 47s and 45s, and every one of them reads local data.
+#
+# The excluded tests are not less important -- they are the M3 invariants.
+# CI runs them on every push, and plain `pytest` still runs them here. What
+# changed is that they no longer run on every commit, because a hook slow
+# enough to be bypassed is a hook that gets bypassed, and a check skipped by
+# --no-verify protects nothing.
+#
+# test_warehouse_generation.py is deliberately NOT excluded: it is the guard
+# that turns an unbuilt warehouse into a failure instead of a silent skip.
+echo "pre-commit: fast lane (everything that needs no local data)"
+PYTHONPATH="$REPO_ROOT" PYTHONIOENCODING=utf-8   "$PYTHON" -m pytest -q --no-header -m "not needs_local_data"
 
 # Licensed vendor exports must not be committed or redistributed. This
 # checked only .zip while TEJ's company master arrives as .xlsx and its bulk

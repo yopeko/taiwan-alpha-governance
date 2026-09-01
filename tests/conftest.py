@@ -60,3 +60,55 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "needs_local_data: requires the operator's archives"
     )
+
+
+# Skips that have nothing to do with whether the data is here. Everything else
+# becomes a failure under `--strict-env`, so this list is the whole exemption
+# surface and it is meant to stay short.
+ENVIRONMENT_INDEPENDENT_SKIPS = (
+    # A parametrised case for a script that does not take the flag being tested.
+    "takes no --interval",
+    # Deliberate: the assertion is made by the presence test just above it.
+    "covered by the presence test above",
+)
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    """Make `--strict-env` mean what its help text says.
+
+    The flag promised that skips become failures "so the operator can confirm
+    nothing is silently skipping". It only ever covered the two fixtures in
+    this file. Thirty-eight `pytest.skip` calls elsewhere went straight past
+    it -- including every one that fires when an archive or the warehouse is
+    missing, which is exactly the set it was written for.
+
+    A guard that covers two of forty cases is worse than no guard, because it
+    is believed. The hook is here rather than at those call sites for the same
+    reason: a rule enforced in one place cannot be forgotten in the next file.
+
+    On a machine with the data, a skip under this flag means something went
+    unchecked. That is a failure, and the message says which one.
+    """
+
+    outcome = yield
+    report = outcome.get_result()
+
+    if not item.config.getoption("--strict-env"):
+        return
+    if not report.skipped or hasattr(report, "wasxfail"):
+        return
+
+    reason = ""
+    if isinstance(report.longrepr, tuple) and len(report.longrepr) == 3:
+        reason = str(report.longrepr[2])
+    if any(allowed in reason for allowed in ENVIRONMENT_INDEPENDENT_SKIPS):
+        return
+
+    report.outcome = "failed"
+    report.longrepr = (
+        f"--strict-env: this test skipped instead of running, and its reason "
+        f"is not one of the environment-independent cases in "
+        f"tests/conftest.py. On a machine that has the data, a skip here means "
+        f"something went unchecked.\n\nreason: {reason}"
+    )
