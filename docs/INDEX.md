@@ -89,6 +89,7 @@
 
 ## M7 巢狀驗證、候選與比較
 
+- [對照 001 結果：動能勝過 20 個隨機種子的全部，而我的預期因此被否證](evidence/m7-control-001-result-2026-09-01.md)
 - [對照計畫 001：隨機選股，M0 §9.1 從未被滿足的那一欄](evidence/m7-control-plan-001-random-selection-2026-09-01.md)
 - [候選報告契約](contracts/candidate-report-contract.md)
 - [對照比較契約](contracts/control-comparison-contract.md)
@@ -109,6 +110,7 @@
 
 ## M9 Shadow 觀察
 
+- [M9：管線 shadow 的兩邊在讀同一份表，而每日重建不是解法](evidence/m9-both-sides-read-the-same-table-2026-09-01.md)
 - [M9：擷取排程之前量到的來源落後，與由此加上的拒絕](evidence/m9-observation-source-staleness-2026-09-01.md)
 - [Shadow 觀察契約（M9 前半）](contracts/shadow-observation-contract.md)
 
