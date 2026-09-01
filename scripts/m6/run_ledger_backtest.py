@@ -205,7 +205,9 @@ MOMENTUM_LOOKBACK_SESSIONS = 252
 MOMENTUM_SKIP_SESSIONS = 21
 
 
-def momentum_12_1(closes: list[float], i: int) -> float | None:
+def momentum_12_1(
+    closes: list[float], i: int, **_identity: str
+) -> float | None:
     """Return from 252 sessions ago to 21 sessions ago. None if too short."""
 
     if i < MOMENTUM_LOOKBACK_SESSIONS:
@@ -267,7 +269,9 @@ def realised_volatility(closes: list[float], i: int) -> float | None:
     return variance ** 0.5
 
 
-def inverse_volatility_60(closes: list[float], i: int) -> float | None:
+def inverse_volatility_60(
+    closes: list[float], i: int, **_identity: str
+) -> float | None:
     """Negative realised volatility, so the quietest name scores highest.
 
     Negated so that higher scores sort first under the same descending rule
@@ -348,10 +352,55 @@ def stop_distance(
     ).sqrt()
 
 
+
+# The control M0 section 9.1 has required from the start -- "equal-size
+# same-pool random selection" -- and which nothing implemented until
+# 2026-09-01. Its absence is why candidate 003's +163.20% cannot be
+# attributed: the window holds 2020-2021, and momentum's Rank IC over the
+# same data is -0.0080 (t = -0.56). Without this, "the ranking helped" and
+# "any ten names would have" are the same number.
+#
+# Pre-registered in docs/evidence/m7-control-plan-001-random-selection-2026-09-01.md
+# before a line of this was written.
+#
+# Scored on identity, never on price. A hash of (seed, market, symbol,
+# session) is reproducible by anyone holding the seed, which the plan fixes in
+# advance. The alternative -- drawing from `random.Random(seed)` in iteration
+# order -- reproduces only while that order holds, and iteration order is a
+# property of the dataset file rather than of anything declared. **A control
+# only its author can reproduce is not a control.**
+CONTROL_SEEDS = (
+    1, 2, 3, 5, 8, 13, 21, 34, 55, 89,
+    144, 233, 377, 610, 987, 1597, 2584, 4181, 6765, 10946,
+)
+
+
+def _random_seeded(seed: int):
+    """A ranking that knows nothing about the market."""
+
+    def score(
+        closes: list[float],
+        i: int,
+        *,
+        market: str = "",
+        symbol: str = "",
+        session: str = "",
+    ) -> float:
+        digest = hashlib.sha256(
+            f"{seed}:{market}:{symbol}:{session}".encode()
+        ).digest()
+        return int.from_bytes(digest[:8], "big") / 2**64
+
+    return score
+
+
 RANKINGS: dict[str, Any] = {
     "": None,
     "momentum-12-1": momentum_12_1,
     "inverse-volatility-60": inverse_volatility_60,
+    # Twenty, because one draw is a sample and the question is whether a
+    # candidate's return sits inside the distribution or outside it.
+    **{f"random-seed-{s}": _random_seeded(s) for s in CONTROL_SEEDS},
 }
 
 
@@ -423,7 +472,10 @@ def breakout_signals(
                 # A gap in the history makes the score unreadable, and a
                 # missing score must not quietly sort as zero.
                 continue
-            score = ranking(closes, len(bars) - 1)
+            score = ranking(
+                closes, len(bars) - 1,
+                market=key[0], symbol=key[1], session=session,
+            )
             if score is None:
                 continue
         signals.append(
@@ -488,7 +540,10 @@ def rank_only_signals(
         closes = [b["close"] for b in bars]
         if any(c is None for c in closes):
             continue
-        score = ranking(closes, len(bars) - 1)
+        score = ranking(
+            closes, len(bars) - 1,
+            market=key[0], symbol=key[1], session=session,
+        )
         if score is None:
             continue
         distance = stop_distance(closes, len(bars) - 1, stop_rule, stop_pct)
