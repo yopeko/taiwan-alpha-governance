@@ -123,3 +123,33 @@ class TestTheCanaryFlag:
 
         out = halts.measure(result([100.0, 101.0, 102.0]))
         assert out["first_8pct_before_session_60"] is None
+
+
+class TestTheDrawdownFieldMeansWhatItSays:
+    """A run manifest's `drawdown_pct` is the drawdown at the last session.
+
+    Momentum finishes the development window at a new high water and reports
+    0.00, while having been 54.06% down on the way. A field of this script was
+    called `reported_max_drawdown_pct` and carried that 0.00 until 2026-09-01.
+    The value was right for what it was; the name promised something else.
+    """
+
+    def test_the_max_is_recomputed_and_not_the_final_value(self):
+        # Down 20%, then back to a new high. Final drawdown 0, max 20.
+        out = halts.measure(result([100.0, 110.0, 88.0, 130.0]))
+        assert out["max_drawdown_pct"] == pytest.approx(20.0)
+
+    def test_the_run_value_is_kept_under_a_name_that_says_what_it_is(self):
+        payload = result([100.0, 110.0, 88.0, 130.0])
+        payload["drawdown_pct"] = 0.0
+        out = halts.measure(payload)
+        assert out["final_drawdown_pct_from_run"] == 0.0
+        assert "reported_max_drawdown_pct" not in out
+
+    def test_a_run_that_never_traded_still_carries_both_keys(self):
+        """Otherwise a summary table gains a hole exactly on the rows where
+        nothing happened, which is where a reader is least likely to look."""
+
+        out = halts.measure(result([100.0] * 4))
+        assert "max_drawdown_pct" in out
+        assert "final_drawdown_pct_from_run" in out

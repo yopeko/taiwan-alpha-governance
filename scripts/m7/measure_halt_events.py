@@ -73,6 +73,8 @@ def measure(result: dict[str, Any]) -> dict[str, Any]:
             "share_of_sessions_below_5pct": None,
             "share_of_sessions_below_8pct": None,
             "first_8pct_before_session_60": None,
+            "max_drawdown_pct": None,
+            "final_drawdown_pct_from_run": result.get("drawdown_pct"),
         }
 
     live = equity[anchor:]
@@ -81,11 +83,13 @@ def measure(result: dict[str, Any]) -> dict[str, Any]:
     date_5 = date_8 = None
     nav_at_8 = None
     below_5 = below_8 = 0
+    max_drawdown = 0.0
 
     for offset, row in enumerate(live):
         nav = float(row["nav"])
         high_water = max(high_water, nav)
         drawdown = 0.0 if high_water <= 0 else (high_water - nav) / high_water
+        max_drawdown = max(max_drawdown, drawdown)
         if drawdown >= WATCHLIST_DRAWDOWN:
             below_5 += 1
             if first_5 is None:
@@ -112,8 +116,14 @@ def measure(result: dict[str, Any]) -> dict[str, Any]:
         "first_8pct_before_session_60": (
             None if first_8 is None else first_8 < CANARY_MINIMUM_SESSIONS
         ),
-        # Reported so a reader can check this against the run it came from.
-        "reported_max_drawdown_pct": result.get("drawdown_pct"),
+        # Recomputed here rather than taken from the run. `drawdown_pct` in a
+        # run manifest is the drawdown **at the last session**, not the worst
+        # one: momentum finishes at a new high water and reports 0.00 while
+        # having been 54.06% down along the way. A field of this script was
+        # called `reported_max_drawdown_pct` and carried that 0.00 until
+        # 2026-09-01, which is a name promising something the value was not.
+        "max_drawdown_pct": max_drawdown * 100,
+        "final_drawdown_pct_from_run": result.get("drawdown_pct"),
     }
 
 
