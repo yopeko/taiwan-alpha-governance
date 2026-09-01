@@ -32,11 +32,29 @@ sys.path.insert(0, str(REPO / "scripts" / "m3"))
 
 
 def load(name: str):
+    """Load a capture script by path.
+
+    Skips where the module reaches Taiwan Core. Some of these scripts import
+    `tw_sepa_screener` transitively -- `capture_tpex_actions` pulls in
+    `capture_window`, which imports `m2_daily_price_pilot` -- and that package
+    is installed only on the operator's machine. Without this guard the three
+    ledger-summary tests error on any runner, which is what they did on the
+    first two CI runs this repository ever had.
+
+    The tests that need no capture script keep running everywhere; that is why
+    the guard is here rather than on the module.
+    """
+
     spec = importlib.util.spec_from_file_location(
         name, REPO / "scripts" / "m3" / f"{name}.py"
     )
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    try:
+        spec.loader.exec_module(module)
+    except ModuleNotFoundError as exc:  # noqa: PERF203
+        if exc.name and exc.name.split(".")[0] == "tw_sepa_screener":
+            pytest.skip(f"{name} needs the Taiwan Core package: {exc}")
+        raise
     return module
 
 

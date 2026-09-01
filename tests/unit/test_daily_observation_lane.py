@@ -23,9 +23,24 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "scripts" / "m3"))
 
-import build_staging  # noqa: E402
-
 LANE = REPO / "scripts" / "m9" / "daily_observation.cmd"
+
+
+def staging():
+    """`build_staging` imports `tw_sepa_screener`, which exists only on the
+    operator's machine.
+
+    Imported here rather than at module scope, and this is why: the module
+    scope version passed locally and broke CI's collection on the first push
+    after it was written -- the whole suite failed in 22 seconds. The lane
+    script tests below need none of that, so they keep running everywhere.
+    """
+
+    try:
+        import build_staging
+    except Exception as exc:  # noqa: BLE001
+        pytest.skip(f"build_staging needs the Taiwan Core package: {exc}")
+    return build_staging
 
 
 class TestTheOverrideDoesNotChangeTheDefault:
@@ -34,7 +49,7 @@ class TestTheOverrideDoesNotChangeTheDefault:
     def test_build_still_defaults_to_every_archive(self):
         import inspect
 
-        sig = inspect.signature(build_staging.build)
+        sig = inspect.signature(staging().build)
         assert sig.parameters["archives"].default is None, (
             "the default must be None, which build() resolves to ARCHIVES. A "
             "default of anything else would silently narrow every rebuild"
@@ -45,7 +60,7 @@ class TestTheOverrideDoesNotChangeTheDefault:
         quietly smaller, and the row count is the only thing that would say
         so -- after the fact."""
 
-        names = {a.name for a in build_staging.ARCHIVES}
+        names = {a.name for a in staging().ARCHIVES}
         for expected in (
             "m2_2026-08-03",
             "m3_window_2025-01-01_2026-08-03",
@@ -67,8 +82,8 @@ class TestAPassedArchiveIsStillProtected:
     def test_publishing_inside_a_passed_archive_is_refused(self, tmp_path):
         archive = tmp_path / "daily-raw"
         archive.mkdir()
-        with pytest.raises(build_staging.StagingError) as caught:
-            build_staging.assert_publishable(
+        with pytest.raises(staging().StagingError) as caught:
+            staging().assert_publishable(
                 archive / "staging", extra_protected=(archive,)
             )
         assert "protected" in str(caught.value)
@@ -76,14 +91,14 @@ class TestAPassedArchiveIsStillProtected:
     def test_publishing_onto_a_passed_archive_is_refused(self, tmp_path):
         archive = tmp_path / "daily-raw"
         archive.mkdir()
-        with pytest.raises(build_staging.StagingError):
-            build_staging.assert_publishable(archive, extra_protected=(archive,))
+        with pytest.raises(staging().StagingError):
+            staging().assert_publishable(archive, extra_protected=(archive,))
 
     def test_a_parent_of_a_passed_archive_is_refused(self, tmp_path):
         archive = tmp_path / "lane" / "daily-raw"
         archive.mkdir(parents=True)
-        with pytest.raises(build_staging.StagingError):
-            build_staging.assert_publishable(
+        with pytest.raises(staging().StagingError):
+            staging().assert_publishable(
                 tmp_path / "lane", extra_protected=(archive,)
             )
 
@@ -91,7 +106,7 @@ class TestAPassedArchiveIsStillProtected:
         archive = tmp_path / "daily-raw"
         archive.mkdir()
         target = tmp_path / "staging"
-        assert build_staging.assert_publishable(
+        assert staging().assert_publishable(
             target, extra_protected=(archive,)
         ) == target.resolve()
 
