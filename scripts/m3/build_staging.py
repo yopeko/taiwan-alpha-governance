@@ -128,11 +128,17 @@ def tree_sha256(root: Path) -> str:
     return sha256_bytes("".join(f"{line}\n" for line in lines).encode("utf-8"))
 
 
-def assert_publishable(target: Path) -> Path:
+def assert_publishable(
+    target: Path, extra_protected: tuple[Path, ...] = ()
+) -> Path:
     """Refuse to publish onto production, an archive, or a non-empty directory."""
 
     resolved = target.resolve()
-    for protected in PROTECTED_PATHS:
+    # A capture root passed via --archives is raw evidence like any other, so
+    # it joins the protected set for this run. Without this the override would
+    # have quietly opened the one hole the function exists to close: publish a
+    # staging root inside the archive being read.
+    for protected in (*PROTECTED_PATHS, *extra_protected):
         try:
             protected_resolved = protected.resolve()
         except OSError:
@@ -153,8 +159,22 @@ def build(
     *,
     limit_per_source: int = 0,
     freeze_clock: bool = True,
+    archives: tuple[Path, ...] | None = None,
 ) -> dict[str, Any]:
-    root = assert_publishable(staging_root)
+    """`archives` defaults to every archive, which is the six-year rebuild.
+
+    The override exists for the M9 daily lane, added 2026-09-01. That lane
+    needs one day of prices turned into the same tables by the same code, and
+    the alternative was a second implementation of row shaping -- which
+    `build_prices_actions` owns, and which two copies of would eventually
+    disagree about.
+
+    A full rebuild is 79.8 minutes (M3.17). One capture root is seconds. The
+    difference is why the daily lane is possible at all.
+    """
+
+    selected = tuple(archives) if archives else ARCHIVES
+    root = assert_publishable(staging_root, extra_protected=selected)
     root.mkdir(parents=True, exist_ok=True)
 
     before = protected_fingerprints()
@@ -178,7 +198,7 @@ def build(
     no_parser: dict[str, int] = {}
     non_parsed: dict[str, dict[str, int]] = {}
 
-    for archive in ARCHIVES:
+    for archive in selected:
         if not archive.is_dir():
             raise StagingError(f"missing archive: {archive}")
         archive_fingerprints[archive.name] = tree_sha256(archive)
@@ -342,10 +362,23 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--staging-root", type=Path, required=True)
     parser.add_argument("--limit-per-source", type=int, default=0)
+    parser.add_argument(
+        "--archive",
+        type=Path,
+        action="append",
+        default=[],
+        help=(
+            "build from these capture roots only, repeatable. Omit for every "
+            "archive, which is the full rebuild. The M9 daily lane passes the "
+            "one root it captured that morning"
+        ),
+    )
     args = parser.parse_args(argv)
 
     manifest = build(
-        args.staging_root, limit_per_source=args.limit_per_source
+        args.staging_root,
+        limit_per_source=args.limit_per_source,
+        archives=tuple(args.archive) or None,
     )
     summary = {
         k: manifest[k]

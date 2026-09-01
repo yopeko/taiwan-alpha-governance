@@ -11,6 +11,7 @@
 
 ## M0–M1 契約與架構
 
+- [Owner 決定 D22：M9 觀察端改為獨立的當日擷取（乙案）](evidence/m3-owner-decision-d22-2026-09-01.md)
 - [Owner 決定 D21：名額的第二個耦合寫進 M0 §8（m0-v1.6.0）](evidence/m3-owner-decision-d21-2026-09-01.md)
 - [ADR-0001](adr/0001-separate-taiwan-core-and-alphamaster-research.md)
 - [ADR-0002](adr/0002-measurement-scale-separate-from-execution-scale.md)
