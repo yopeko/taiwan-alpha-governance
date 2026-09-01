@@ -185,6 +185,15 @@ def observe(
             "competing with the observation, not a correction of it"
         )
 
+    # Checked before the rebuild, not after. It reads only the arguments, so
+    # running it later bought nothing and cost two things: a caller with a
+    # typo paid for a full reconstruction before being told, and the test for
+    # this refusal could not run anywhere without a warehouse -- which is how
+    # it went unnoticed until CI ran for the first time.
+    unknown = [code for code in reasons if code not in REASON_CODES]
+    if unknown:
+        raise SystemExit(f"unknown reason codes {unknown}; section 3 lists them")
+
     rebuilt = reconstruct_snapshot(session, decision_as_of)
     gaps = divergence(observed, rebuilt)
     total = sum(gaps.values())
@@ -195,9 +204,6 @@ def observe(
             f"{list(REASON_CODES)}, and `unexplained` is a defect to be "
             "opened rather than a value to be omitted"
         )
-    unknown = [code for code in reasons if code not in REASON_CODES]
-    if unknown:
-        raise SystemExit(f"unknown reason codes {unknown}; section 3 lists them")
 
     return {
         "session_date": session,

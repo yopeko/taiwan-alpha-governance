@@ -19,6 +19,8 @@ from pathlib import Path
 
 import pytest
 
+from conftest import TAIWAN_CORE
+
 REPO = Path(__file__).resolve().parents[2]
 SCRIPTS = REPO / "scripts"
 RAW = Path(r"C:\project\tw-sepa-screener\data\raw_v2")
@@ -242,7 +244,23 @@ def test_no_future_information_leaks_into_an_earlier_cutoff():
     except Exception as exc:  # noqa: BLE001
         pytest.skip(f"warehouse not available: {exc}")
 
-    warehouse = default_warehouse()
+    # The import succeeding does not mean the tables exist. `default_warehouse`
+    # reads them, so the guard has to cover the call and not only the import --
+    # it did not, and the first CI run was what found out.
+    #
+    # Which way it goes is the rule tests/warehouse.py already sets: no Taiwan
+    # Core means the warehouse cannot exist here, so skip; Taiwan Core present
+    # with no warehouse is a machine that should have one, so fail. A skip
+    # there would hide a missing build behind a green summary.
+    try:
+        warehouse = default_warehouse()
+    except Exception as exc:  # noqa: BLE001
+        if not TAIWAN_CORE.is_dir():
+            pytest.skip(f"warehouse not available: {exc}")
+        pytest.fail(
+            f"this machine has Taiwan Core, so the warehouse should be built: "
+            f"{exc}"
+        )
     session = cutoff = "2025-06-16"
     result = warehouse.reconstruct(as_of_session=session, decision_as_of=cutoff)
     flagged = {
