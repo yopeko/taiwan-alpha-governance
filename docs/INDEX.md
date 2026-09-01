@@ -90,6 +90,7 @@
 
 ## M7 巢狀驗證、候選與比較
 
+- [診斷 002 結果：預期成立但理由是錯的，而正確的理由指向政策不指向策略](evidence/m7-diagnostic-002-halt-rules-result-2026-09-01.md)
 - [診斷計畫 002：把 M0 §8.1 的停止規則套上去量一次](evidence/m7-diagnostic-plan-002-halt-rules-2026-09-01.md)
 - [對照 001 結果：動能勝過 20 個隨機種子的全部，而我的預期因此被否證](evidence/m7-control-001-result-2026-09-01.md)
 - [對照計畫 001：隨機選股，M0 §9.1 從未被滿足的那一欄](evidence/m7-control-plan-001-random-selection-2026-09-01.md)
