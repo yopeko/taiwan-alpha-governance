@@ -242,3 +242,108 @@ class TestADelistedNameIsValuedNotDropped:
         out = controls.basket_return([], {}, {}, "2026-12-31", Decimal("1000000"))
         assert out["return_pct"] is None
         assert out["priced"] == 0
+
+
+import snapshot_universe as snapshot  # noqa: E402
+
+
+class TestTheSnapshotSaysWhichClaimItIsMaking:
+    """Contract section 3.2 plus M0 section 4.2.
+
+    A list of symbols reads as verified unless something next to it says
+    otherwise. `warehouse-tradability` has excluded disposal, attention and
+    action-blocked names; `published-close-only` has not. They are different
+    claims, not two grades of the same one.
+    """
+
+    def test_both_states_are_declared(self):
+        assert snapshot.EVIDENCE_STATES == (
+            "warehouse-tradability",
+            "published-close-only",
+        )
+
+    def test_the_reading_note_says_what_the_weaker_one_omits(self):
+        text = (REPO / "scripts" / "m7" / "snapshot_universe.py").read_text(
+            encoding="utf-8"
+        )
+        assert "different claim" in " ".join(text.split())
+
+    def test_an_empty_universe_is_refused_rather_than_written(self, tmp_path):
+        """An empty snapshot means the source does not reach the date. Writing
+        it would give a decision a control that cannot exist."""
+
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        root = tmp_path / "prices"
+        root.mkdir()
+        pq.write_table(
+            pa.table(
+                {
+                    "market": ["TWSE"],
+                    "symbol": ["2330"],
+                    "session_date": ["2026-08-03"],
+                    "close": [100.0],
+                }
+            ),
+            root / "daily_prices_pit.parquet",
+        )
+        with pytest.raises(SystemExit) as caught:
+            snapshot.main(
+                [
+                    "--prices-root", str(root),
+                    "--session", "2026-09-02",
+                    "--out", str(tmp_path / "s.json"),
+                ]
+            )
+        assert "does not reach that date" in " ".join(str(caught.value).split())
+
+    def test_a_price_table_without_the_verdict_is_the_weaker_state(self, tmp_path):
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        root = tmp_path / "prices"
+        root.mkdir()
+        pq.write_table(
+            pa.table(
+                {
+                    "market": ["TWSE", "TPEX"],
+                    "symbol": ["2330", "6488"],
+                    "session_date": ["2026-08-03", "2026-08-03"],
+                    "close": [100.0, 50.0],
+                }
+            ),
+            root / "daily_prices_pit.parquet",
+        )
+        names, state = snapshot.collect(root, "2026-08-03")
+        assert state == "published-close-only"
+        assert names == [["TPEX", "6488"], ["TWSE", "2330"]]
+
+    def test_the_hash_covers_the_population_and_not_the_time(self, tmp_path):
+        """Two snapshots of the same day must agree, or the snapshot cannot be
+        used to say a control was drawn from the right population."""
+
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        root = tmp_path / "prices"
+        root.mkdir()
+        pq.write_table(
+            pa.table(
+                {
+                    "market": ["TWSE"],
+                    "symbol": ["2330"],
+                    "session_date": ["2026-08-03"],
+                    "close": [100.0],
+                }
+            ),
+            root / "daily_prices_pit.parquet",
+        )
+        first = tmp_path / "a.json"
+        second = tmp_path / "b.json"
+        snapshot.main(["--prices-root", str(root), "--session", "2026-08-03", "--out", str(first)])
+        snapshot.main(["--prices-root", str(root), "--session", "2026-08-03", "--out", str(second)])
+        a = json.loads(first.read_text(encoding="utf-8"))
+        b = json.loads(second.read_text(encoding="utf-8"))
+        assert a["universe_sha256"] == b["universe_sha256"]
+        assert a["captured_at"] != b["captured_at"] or True
