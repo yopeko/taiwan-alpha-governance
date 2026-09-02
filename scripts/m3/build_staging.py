@@ -82,6 +82,16 @@ ARCHIVES = (
     # TPEx session from 2019 to 2023 stays `unknown`, and the backfill would
     # have bought six years of TWSE and two of TPEx.
     RAW / "m3_tpex_actions_2019-2023",
+    # The 2026-08-04 .. 2026-09-02 gap, captured 2026-09-02 to bring the
+    # warehouse to the day the discretionary track needed a universe for.
+    # Prices, market status and the TWSE action lane; the TPEx action lane is
+    # not here because MOPS answers one symbol-year at a time and refreshing
+    # 2026 is about two and a half hours -- `monthly_tpex_actions.cmd`.
+    RAW / "m3_window_2026-08-04_2026-09-02",
+    RAW / "m3_market_status_2026-08-04_2026-09-02",
+    RAW / "m3_actions_2026-08-04_2026-09-02",
+    RAW / "m3_tpex_announcements_2026-08-04_2026-09-02",
+    RAW / "m3_reduction_detail_2026-08",
 )
 
 # Publishing anywhere at or inside these is forbidden.

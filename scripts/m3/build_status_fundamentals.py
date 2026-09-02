@@ -32,6 +32,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 SCHEMA_ID = "tw-alpha-m3-status-fundamentals/1.0.0"
 RAW = Path(r"C:\project\tw-sepa-screener\data\raw_v2")
 TEJ_LANE = RAW / "m3_tej_licensed_2026-08-16"
+# The end is used as the close of an **open** interval, not as a filter --
+# a designation that has not been lifted runs to it. So a stale value here
+# does not drop rows, it expires live restrictions: every full-cash-delivery
+# name would read as unrestricted from 2026-08-04, which is a wrong answer
+# rather than a missing one. `--window-end` moves it; omitted, unchanged.
 WINDOW = (date(2019, 1, 1), date(2026, 8, 3))
 
 TPEX_ANNOUNCEMENT_DETAIL_SOURCE = "TPEX-ANNOUNCEMENT-DETAIL"
@@ -248,7 +253,7 @@ def reduction_details(index, manifests) -> dict[tuple[str, str], dict[str, Any]]
     return details
 
 
-def build_full_cash_delivery() -> list[dict[str, Any]]:
+def build_full_cash_delivery(window_end: date | None = None) -> list[dict[str, Any]]:
     """全額交割 intervals from the vendor company master.
 
     A security on full-cash-delivery is not normally tradable: the buyer
@@ -305,7 +310,7 @@ def build_full_cash_delivery() -> list[dict[str, Any]]:
                     "effective_from": start,
                     # An open interval runs to the end of the window; the
                     # designation had not been lifted by then.
-                    "effective_to": end or WINDOW[1].isoformat(),
+                    "effective_to": end or (window_end or WINDOW[1]).isoformat(),
                     "altered_trading": True,
                     "reason_text": "",
                     "measure_text": "全額交割",
@@ -654,7 +659,9 @@ def write(path: Path, rows: list[dict[str, Any]]) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def build(staging_root: Path, out_root: Path) -> dict[str, Any]:
+def build(
+    staging_root: Path, out_root: Path, window_end: date | None = None
+) -> dict[str, Any]:
     if out_root.exists() and any(out_root.iterdir()):
         raise SystemExit(f"output root must be empty: {out_root}")
     index = load_index(staging_root)
@@ -669,7 +676,7 @@ def build(staging_root: Path, out_root: Path) -> dict[str, Any]:
         build_reductions(index, manifests)
         + build_par_value_changes(index, manifests)
         + build_tpex_announcement_halts(index, manifests)
-        + build_full_cash_delivery()
+        + build_full_cash_delivery(window_end)
     )
     events = sorted(
         events + halts,
@@ -747,8 +754,24 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--staging-root", type=Path, required=True)
     parser.add_argument("--out-root", type=Path, required=True)
+    parser.add_argument(
+        "--window-end",
+        type=date.fromisoformat,
+        default=None,
+        help=(
+            "close open designations here. Omit for the constant's own end, "
+            "which expires them on a date that is no longer current"
+        ),
+    )
     args = parser.parse_args(argv)
-    print(json.dumps(build(args.staging_root, args.out_root), ensure_ascii=False, indent=2, sort_keys=True))
+    print(
+        json.dumps(
+            build(args.staging_root, args.out_root, window_end=args.window_end),
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        )
+    )
     return 0
 
 

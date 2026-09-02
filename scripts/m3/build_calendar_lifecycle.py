@@ -54,6 +54,11 @@ TEJ_MASTER_LANE = RAW / "m3_tej_master_2026-08-22"
 # merely corroboration, it closes three intervals nothing else closes.
 TRADING_STATUS_CAPTURE = Path(r"C:\tmp\tw-alpha-m3-trading-status-01")
 WINDOW_START = date(2019, 1, 1)
+# A date that was current when it was written. `--window-end` moves it;
+# omitted, the behaviour is unchanged. The same constant in
+# `build_prices_actions` silently dropped a month of sessions on
+# 2026-09-02, and this one bounds the calendar the as-of interface walks,
+# so leaving it would stop `tradability_state` at the same date.
 WINDOW_END = date(2026, 8, 3)
 MARKETS = ("TWSE", "TPEX")
 
@@ -81,7 +86,9 @@ def parse_manifest_for(staging: Path, parse_run_id: str) -> Path | None:
     return None
 
 
-def build_calendar(staging: Path, index: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def build_calendar(
+    staging: Path, index: list[dict[str, Any]], window_end: date | None = None
+) -> list[dict[str, Any]]:
     """One row per market-date, with the evidence that decided its state."""
 
     observed: dict[tuple[str, str], dict[str, Any]] = {}
@@ -99,7 +106,8 @@ def build_calendar(staging: Path, index: list[dict[str, Any]]) -> list[dict[str,
     # captured date is itself the no-data signal.
     rows: list[dict[str, Any]] = []
     cursor = WINDOW_START
-    while cursor <= WINDOW_END:
+    last = window_end or WINDOW_END
+    while cursor <= last:
         iso = cursor.isoformat()
         present = {m: observed.get((m, iso)) for m in MARKETS}
         any_open = any(
@@ -145,7 +153,7 @@ def build_calendar(staging: Path, index: list[dict[str, Any]]) -> list[dict[str,
     return rows
 
 
-def load_tej_lifecycle() -> list[dict[str, Any]]:
+def load_tej_lifecycle(window_end: date | None = None) -> list[dict[str, Any]]:
     """Filings-derived rows, then master-derived rows for what they missed.
 
     The master lane is additive on purpose. It is read second and only
@@ -162,7 +170,7 @@ def load_tej_lifecycle() -> list[dict[str, Any]]:
             market = BOARD_MARKETS.get(leg["board"])
             if not market or (market, record["symbol"]) in seen:
                 continue
-            if not overlaps_window(leg["start"], leg["end"]):
+            if not overlaps_window(leg["start"], leg["end"], window_end):
                 # The master reaches back to the 1960s. A leg that closed
                 # before this warehouse opens is history, not a gap.
                 continue
@@ -429,13 +437,13 @@ def _iso(value: Any) -> str:
     return "" if text.lower() in NULL else text
 
 
-def overlaps_window(start: str, end: str) -> bool:
+def overlaps_window(start: str, end: str, window_end: date | None = None) -> bool:
     """Does [start, end) touch the warehouse window at all?
 
     An open end means still current, which always reaches the window end.
     """
 
-    if start and start > WINDOW_END.isoformat():
+    if start and start > (window_end or WINDOW_END).isoformat():
         return False
     if end and end <= WINDOW_START.isoformat():
         return False
@@ -544,12 +552,14 @@ def write_csv(path: Path, rows: list[dict[str, Any]]) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def build(staging_root: Path, out_root: Path) -> dict[str, Any]:
+def build(
+    staging_root: Path, out_root: Path, window_end: date | None = None
+) -> dict[str, Any]:
     if out_root.exists() and any(out_root.iterdir()):
         raise SystemExit(f"output root must be empty: {out_root}")
     index = load_index(staging_root)
-    calendar = build_calendar(staging_root, index)
-    events, intervals = build_lifecycle(load_tej_lifecycle())
+    calendar = build_calendar(staging_root, index, window_end)
+    events, intervals = build_lifecycle(load_tej_lifecycle(window_end))
     intervals, delisting_stats = apply_official_delistings(intervals)
 
     boards = build_board_intervals(load_company_master())
@@ -570,7 +580,11 @@ def build(staging_root: Path, out_root: Path) -> dict[str, Any]:
         "staging_dataset_id": json.loads(
             (staging_root / "dataset_manifest.json").read_bytes()
         )["dataset_id"],
-        "window": {"start": WINDOW_START.isoformat(), "end": WINDOW_END.isoformat()},
+        # What applied, not the constant.
+        "window": {
+            "start": WINDOW_START.isoformat(),
+            "end": (window_end or WINDOW_END).isoformat(),
+        },
         "trading_calendar_pit": {
             "rows": len(calendar),
             "sha256": calendar_sha,
@@ -624,8 +638,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--staging-root", type=Path, required=True)
     parser.add_argument("--out-root", type=Path, required=True)
+    parser.add_argument(
+        "--window-end",
+        type=date.fromisoformat,
+        default=None,
+        help="last calendar date to generate. Omit for the constant's own end",
+    )
     args = parser.parse_args(argv)
-    manifest = build(args.staging_root, args.out_root)
+    manifest = build(args.staging_root, args.out_root, window_end=args.window_end)
     print(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True))
     return 0
 

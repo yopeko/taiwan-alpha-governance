@@ -38,6 +38,7 @@
 - [Official Raw Snapshot 契約](contracts/raw-snapshot-contract.md)
 - [TEJ PRO 匯入規格](contracts/tej-import-spec.md)
 - [M3.1 完成證據：耐久封存與 coverage ledger](evidence/m3-1-coverage-ledger-and-durable-archival-2026-08-16.md)
+- [一個寫死的窗口上界，出現在三支建表程式裡——第三支給的是錯答案不是缺資料](evidence/m3-hardcoded-window-end-2026-09-03.md)
 - [M3.10 減資公告日與停止買賣日](evidence/m3-10-reduction-announcement-linkage-2026-08-19.md)
 - [M3.11 TPEx 公司行動晉升 canonical 表](evidence/m3-11-tpex-actions-promotion-2026-08-19.md)
 - [M3.12 變更股票面額取得官方來源](evidence/m3-12-par-value-change-2026-08-19.md)
