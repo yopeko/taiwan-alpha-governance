@@ -301,7 +301,16 @@ def inverse_volatility_60(
 # Barroso & Santa-Clara (2015) and Daniel & Moskowitz (2016) on
 # volatility-managed momentum; Baz et al. standardise MACD by 63-day
 # volatility for the same reason.
-STOP_RULES = ("fixed", "volatility")
+STOP_RULES = ("fixed", "volatility", "trailing")
+
+# Candidate plan 006. `fixed` and `volatility` both measure from the entry
+# price, and M0 section 8.1 halts on drawdown from the NAV high water -- two
+# reference points, with nothing bounding the distance between them. Diagnostic
+# 002 measured that distance at 54.06%.
+#
+# `trailing` ratchets each position's stop up behind its own peak, so giveback
+# from a peak is bounded by the stop distance rather than unbounded. The
+# initial distance is the same as `fixed`; only the reference point moves.
 
 # Two standard deviations, scaled from daily to the 21-session holding period.
 # The square-root scaling is the standard conversion, not a choice. The
@@ -337,12 +346,32 @@ STOP_HORIZON_SESSIONS = 21
 # first written: a position whose entire risk budget is smaller than its round
 # trip is refused for that reason, which is the right reason. Nothing at the
 # loud end needs catching -- it just gets small.
+def trail_stop(
+    stop_price: Decimal, peak_high: Decimal, stop_pct: Decimal
+) -> Decimal:
+    """The stop a trailing rule allows, given the peak **through yesterday**.
+
+    Ratchet only: it never lowers a stop. A trailing stop that could fall
+    would let a position give back more than the distance it advertises, which
+    is the property the whole rule exists for.
+
+    The caller owns the promise that `peak_high` excludes today. Extracted here
+    so the arithmetic is testable without a backtest; the ordering that keeps
+    that promise is asserted separately, because it lives in the holding loop.
+    """
+
+    trailed = peak_high * (Decimal("1") - stop_pct)
+    return trailed if trailed > stop_price else stop_price
+
+
 def stop_distance(
     closes: list[float], i: int, rule: str, fixed_pct: Decimal
 ) -> Decimal | None:
     """How far below entry the stop sits, as a fraction of price."""
 
-    if rule == "fixed":
+    if rule in ("fixed", "trailing"):
+        # Same opening distance. `trailing` differs in what it measures from
+        # afterwards, which is the holding loop's job, not this function's.
         return fixed_pct
     vol = realised_volatility(closes, i)
     if vol is None:
@@ -420,6 +449,14 @@ class OpenPosition:
     entry_price: Decimal
     stop_price: Decimal
     quantity: int
+    # The highest session high seen **through the previous session**, which is
+    # what a trailing stop may use today. Updated after today's stop check, so
+    # today's high can only move tomorrow's stop.
+    #
+    # Starts at the entry price rather than the entry session's high: on the
+    # day of entry the high is not yet known when the position opens, and
+    # using it would let a stop be set from a price that had not happened.
+    peak_high: Decimal = Decimal("0")
 
 
 def load_dataset(root: Path) -> tuple[list[str], dict[str, dict[tuple[str, str], dict]]]:
@@ -577,6 +614,7 @@ def run(
     first_trading_session: str | None = None,
     entry_rule: str = "breakout",
     stop_rule: str = "fixed",
+    max_positions: int | None = None,
 ) -> dict[str, Any]:
     sessions, by_session = load_dataset(dataset_root)
     ledger = Ledger(opening_cash=opening_cash, sessions=[date.fromisoformat(s) for s in sessions])
@@ -587,6 +625,20 @@ def run(
     trades: list[dict[str, Any]] = []
     refusals: dict[str, int] = defaultdict(int)
     ranking = RANKINGS[ranking_name]
+
+    # Candidate plan 006 section 2.2. `POLICY_MAX_POSITIONS` lives in
+    # `m5/ledger.py`, a byte-identical mirror of Taiwan Core, so it cannot be
+    # edited here -- and should not be: M0 section 8 sets 10 as a ceiling, not
+    # a target, so holding fewer is already compliant.
+    #
+    # `min` and not the requested value: a candidate able to ask for more than
+    # policy allows would be a way around the cap rather than a choice inside
+    # it. A test asserts this cannot be loosened.
+    slots = (
+        POLICY_MAX_POSITIONS
+        if max_positions is None
+        else min(max_positions, POLICY_MAX_POSITIONS)
+    )
     # Deep enough for whichever needs more history, the entry rule or the
     # ranking. Trimming to the breakout lookback alone left 22 bars, and a
     # 252-session momentum read against 22 bars scores nothing at all.
@@ -688,7 +740,22 @@ def run(
                 continue
             close = Decimal(str(row["close"]))
             low = Decimal(str(row["low"])) if row["low"] is not None else close
+            high = Decimal(str(row["high"])) if row["high"] is not None else close
             age = index - sessions.index(position.entry_session)
+
+            # Candidate plan 006 section 2.1. The ratchet uses `peak_high`,
+            # which holds highs **through the previous session** -- today's is
+            # folded in below, after the stop has been checked.
+            #
+            # Raising the stop from today's high and then testing today's low
+            # would decide where the stop sat using a price not yet known when
+            # the session opened. That is intra-session look-ahead, and it
+            # makes results better, which is what makes it dangerous.
+            if stop_rule == "trailing":
+                position.stop_price = trail_stop(
+                    position.stop_price, position.peak_high, stop_pct
+                )
+
             reason = None
             if low <= position.stop_price:
                 # Conservative: when a session touches both the stop and a
@@ -704,6 +771,9 @@ def run(
             elif age >= max_holding_sessions:
                 reason, price = "max-holding", close
             if reason is None:
+                # Survived. Today's high may move the stop from tomorrow.
+                if high > position.peak_high:
+                    position.peak_high = high
                 continue
             legs = lot_legs(position.quantity)
             for leg in legs:
@@ -769,7 +839,7 @@ def run(
                 # rank violations out of the account's own best position.
                 note_refusal("entry:already-held", signal)
                 continue
-            if len(positions) >= POLICY_MAX_POSITIONS:
+            if len(positions) >= slots:
                 note_refusal("entry:position-slots-full", signal)
                 continue
             row = rows.get(key)
@@ -835,6 +905,9 @@ def run(
                     entry_price=result.fill_price or entry,
                     stop_price=signal.stop_price,
                     quantity=result.filled_quantity,
+                    # Not the entry session's high: that price had not
+                    # happened when the position opened.
+                    peak_high=result.fill_price or entry,
                 )
                 if signal.score is not None:
                     opened_scores.append(signal.score)
@@ -880,7 +953,7 @@ def run(
                     for s in ranked
                     if rows[(s.market, s.symbol)]["tradability_state"]
                     == TRADABLE_STATE
-                ][:POLICY_MAX_POSITIONS]
+                ][:slots]
             else:
                 pending = []
         else:
@@ -932,6 +1005,9 @@ def run(
             # decided by arrival order. ADR-0002 decision 4, as amended on
             # 2026-08-26, marks such a run `selection-logic-not-measured`.
             "ranking_function": ranking_name,
+            # What applied, not what was requested. A run that asked for 12
+            # and got 10 must not read as a 12-slot run.
+            "max_positions": slots,
         },
         "rank_violations_scarcity": scarcity_violations if ranking_name else -1,
         "rank_violations_sizing": sizing_violations if ranking_name else -1,
@@ -1156,6 +1232,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--opening-cash", type=Decimal, default=Decimal("10000"))
     parser.add_argument("--lookback", type=int, default=20)
+    parser.add_argument(
+        "--max-positions",
+        type=int,
+        default=None,
+        help=(
+            "hold at most this many names. Clamped to M0 section 8's cap, so "
+            "it can only tighten. Omit for the policy maximum"
+        ),
+    )
     parser.add_argument("--stop-pct", type=Decimal, default=Decimal("0.08"))
     parser.add_argument("--max-holding-sessions", type=int, default=20)
     parser.add_argument(
@@ -1232,6 +1317,7 @@ def main(argv: list[str] | None = None) -> int:
         first_trading_session=args.first_trading_session,
         entry_rule=args.entry,
         stop_rule=args.stop_rule,
+        max_positions=args.max_positions,
     )
 
     if args.report_root:

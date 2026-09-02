@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| 狀態 | **`awaiting-owner-approval`。未實作，未執行。** |
+| 狀態 | **`approved` 2026-09-02（Owner）。** 實作與測試於核准後提交，執行在其後 |
 | 資料 | 開發區 `tw-alpha-m7-split-01/development`，`128619cc…` |
 | 封存區 | 不涉及。**開封次數維持 0** |
 | 契約 | [對照比較契約](../contracts/control-comparison-contract.md) v1.1.0、[試驗登錄契約](../contracts/trial-ledger-contract.md) v1.1.0 |
@@ -130,7 +130,7 @@ M0 §8 的「最大持股數 10」是上限不是下限，所以持有 8 檔完�
 
 ## 8. 執行順序（任何一步不得跳過）
 
-1. **本計畫由 Owner 核准。** 未核准前不實作。
+1. ~~**本計畫由 Owner 核准。**~~ **已核准，2026-09-02。**
 2. 實作移動停損（§2.1 的非前視形式）與 `--max-positions`（§2.2 的只收緊），**加測試，提交**。commit 必須早於任何一次執行。
 3. 一條測試盯著 `--max-positions` 不能超過 `POLICY_MAX_POSITIONS`。
 4. 一條測試盯著移動停損只用前一場次的高點。
