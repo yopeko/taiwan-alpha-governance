@@ -5,7 +5,7 @@
 | 欄位 | 值 |
 |---|---|
 | 專案 ID | `tw-alpha-platform` |
-| 契約版本 | `m0-v1.6.0`（2026-09-01；§8 補上名額的第二個耦合——名額同時決定部位大小，而部位大小決定最低手續費咬不咬得到，見 [D21](evidence/m3-owner-decision-d21-2026-09-01.md)。v1.5.0 見 [D20](evidence/m3-owner-decision-d20-2026-08-29.md)；v1.4.0 見 [D19](evidence/m3-owner-decision-d19-2026-08-29.md)；v1.3.0 見 [D18](evidence/m3-owner-decision-d18-2026-08-28.md)；v1.2.0 見 [D17](evidence/m3-owner-decision-d17-2026-08-27.md)；v1.1.0 見 [D16](evidence/m3-owner-decision-d16-2026-08-25.md)）|
+| 契約版本 | `m0-v1.7.0`（2026-09-02；§2.1 承認候選的第二個來源——人的判斷，驗證要求相同，見 [D23](evidence/m3-owner-decision-d23-2026-09-02.md)。v1.6.0 見 [D21](evidence/m3-owner-decision-d21-2026-09-01.md)：§8 補上名額的第二個耦合——名額同時決定部位大小，而部位大小決定最低手續費咬不咬得到，見 [D21](evidence/m3-owner-decision-d21-2026-09-01.md)。v1.5.0 見 [D20](evidence/m3-owner-decision-d20-2026-08-29.md)；v1.4.0 見 [D19](evidence/m3-owner-decision-d19-2026-08-29.md)；v1.3.0 見 [D18](evidence/m3-owner-decision-d18-2026-08-28.md)；v1.2.0 見 [D17](evidence/m3-owner-decision-d17-2026-08-27.md)；v1.1.0 見 [D16](evidence/m3-owner-decision-d16-2026-08-25.md)）|
 | 狀態 | `baseline-approved-for-planning` |
 | 生效日 | 2026-08-02 |
 | 時區 | `Asia/Taipei` |
@@ -19,6 +19,10 @@
 ### 2.1 目的
 
 建立以官方資料、Point-in-time 證據及受控策略升級為核心的台股研究與決策平台。AlphaMaster 用於產生研究候選；台股核心負責市場真實性、驗證、帳本及治理。
+
+**候選亦得由人的判斷產生**（`m0-v1.7.0`，[D23](evidence/m3-owner-decision-d23-2026-09-02.md)）。原文只寫了 AlphaMaster，隱含候選只有一個來源；一個由人挑出的部位同樣是候選。
+
+**驗證要求完全相同**：§8 的資金與風險政策、§9 的升級軌道、§9.1 的最低比較組，對兩種來源一字不改地適用。**由人挑出的候選不因此獲得任何豁免**，而它必須滿足的 §9.1 那一組對照——等權股票池、隨機選股——正是[判斷式研究契約](contracts/discretionary-research-contract.md)的核心工具。
 
 ### 2.2 第一階段非目標
 

@@ -11,6 +11,7 @@
 
 ## M0–M1 契約與架構
 
+- [Owner 決定 D23：判斷式研究軌道獲准，M0 §2.1 承認第二個候選來源（m0-v1.7.0）](evidence/m3-owner-decision-d23-2026-09-02.md)
 - [Owner 決定 D22：M9 觀察端改為獨立的當日擷取（乙案）](evidence/m3-owner-decision-d22-2026-09-01.md)
 - [Owner 決定 D21：名額的第二個耦合寫進 M0 §8（m0-v1.6.0）](evidence/m3-owner-decision-d21-2026-09-01.md)
 - [ADR-0001](adr/0001-separate-taiwan-core-and-alphamaster-research.md)
@@ -90,6 +91,7 @@
 
 ## M7 巢狀驗證、候選與比較
 
+- [判斷式研究契約](contracts/discretionary-research-contract.md)
 - [提案 002：判斷式研究軌道——賺錢也要分得出是運氣還是能力（待 Owner 裁決）](evidence/m7-proposal-002-discretionary-track-2026-09-02.md)
 - [提案 001：脫離風險式定量——完整規劃（待 Owner 裁決）](evidence/m7-proposal-001-sizing-basis-2026-09-02.md)
 - [診斷 004 結果：不可達，但網格找到一個兩軸都更好的地方](evidence/m7-diagnostic-004-reachability-result-2026-09-02.md)
