@@ -90,6 +90,7 @@
 
 ## M7 巢狀驗證、候選與比較
 
+- [診斷計畫 004：現有的兩個槓桿夠不夠把 33.56% 推到 8%](evidence/m7-diagnostic-plan-004-reachability-2026-09-02.md)
 - [候選 006 結果：兩個預期都被否證，方向相反](evidence/m7-candidate-006-result-2026-09-02.md)
 - [候選計畫 006：把停損的參考點改成峰值，並把名額收到讓算術成立](evidence/m7-candidate-plan-006-trailing-stop-2026-09-02.md)
 - [診斷 003 結果：7.50% 的間隙是用停損價算的，而成交不在停損價](evidence/m7-diagnostic-003-stop-fill-quality-result-2026-09-01.md)
