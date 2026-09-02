@@ -49,6 +49,13 @@ ACTION_DETAIL_SOURCES = {"MOPS-TPEX-ACTIONS-DETAIL": "TPEX"}
 # never defines which events exist.
 RAW_V2 = Path(r"C:\project\tw-sepa-screener\data\raw_v2")
 TEJ_DIVIDEND_LANE = RAW_V2 / "m3_tej_dividends_2026-08-19"
+# The six-year window this warehouse was built for. The end is a date that was
+# current when it was written and is not any more, and `build_prices` silently
+# skipped every session past it -- 43,603 staging rows became 0 price rows on
+# 2026-09-02 with no error and no count.
+#
+# `--window-end` overrides it; omitted, the behaviour is unchanged. The M9
+# daily lane passes the session it captured.
 WINDOW = (date(2019, 1, 1), date(2026, 8, 3))
 
 OHLC_COMPLETE = "complete"
@@ -168,11 +175,20 @@ def collapse_quotes(
     return collapsed, duplicates
 
 
-def build_prices(staging: Path, index: list[dict[str, Any]], manifests: dict[str, Path]):
+def build_prices(
+    staging: Path,
+    index: list[dict[str, Any]],
+    manifests: dict[str, Path],
+    window_end: date | None = None,
+):
     rows: list[dict[str, Any]] = []
     state_counts: dict[str, int] = {}
     columns_seen: set[str] = set()
-    lo, hi = WINDOW
+    # Counted rather than only skipped: a session dropped for being outside the
+    # window is a decision, and one that leaves no number behind is how 43,603
+    # rows became 0 without anything saying so.
+    outside_window = 0
+    lo, hi = WINDOW[0], (window_end or WINDOW[1])
     for record in index:
         market = PRICE_SOURCES.get(record["source_id"])
         if not market:
@@ -182,6 +198,7 @@ def build_prices(staging: Path, index: list[dict[str, Any]], manifests: dict[str
             continue
         session = date.fromisoformat(period.split(":", 1)[1])
         if not (lo <= session <= hi):
+            outside_window += 1
             continue
         manifest_path = manifests.get(record["parse_run_id"])
         if manifest_path is None:
@@ -238,7 +255,7 @@ def build_prices(staging: Path, index: list[dict[str, Any]], manifests: dict[str
     state_counts = {}
     for row in rows:
         state_counts[row["ohlc_state"]] = state_counts.get(row["ohlc_state"], 0) + 1
-    return rows, state_counts, sorted(columns_seen), collapsed
+    return rows, state_counts, sorted(columns_seen), collapsed, outside_window
 
 
 # The TPEx detail observation is addressed by the announcement it came from,
@@ -806,13 +823,15 @@ def write(path: Path, rows: list[dict[str, Any]]) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def build(staging_root: Path, out_root: Path) -> dict[str, Any]:
+def build(staging_root: Path, out_root: Path, window_end: date | None = None) -> dict[str, Any]:
     if out_root.exists() and any(out_root.iterdir()):
         raise SystemExit(f"output root must be empty: {out_root}")
     index = load_index(staging_root)
     manifests = parse_manifest_index(staging_root)
 
-    prices, ohlc_states, columns, collapsed = build_prices(staging_root, index, manifests)
+    prices, ohlc_states, columns, collapsed, outside_window = build_prices(
+        staging_root, index, manifests, window_end=window_end
+    )
     actions, action_stats = build_actions(staging_root, index, manifests)
 
     price_sha = write(out_root / "daily_prices_pit.parquet", prices)
@@ -824,7 +843,13 @@ def build(staging_root: Path, out_root: Path) -> dict[str, Any]:
         "staging_dataset_id": json.loads(
             (staging_root / "dataset_manifest.json").read_bytes()
         )["dataset_id"],
-        "window": {"start": WINDOW[0].isoformat(), "end": WINDOW[1].isoformat()},
+        # What applied, not the constant. A run with an override must not
+        # read as a run without one.
+        "window": {
+            "start": WINDOW[0].isoformat(),
+            "end": (window_end or WINDOW[1]).isoformat(),
+        },
+        "sessions_outside_window": outside_window,
         "daily_prices_pit": {
             "rows": len(prices),
             "sha256": price_sha,
@@ -878,8 +903,24 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--staging-root", type=Path, required=True)
     parser.add_argument("--out-root", type=Path, required=True)
+    parser.add_argument(
+        "--window-end",
+        type=date.fromisoformat,
+        default=None,
+        help=(
+            "accept sessions up to this date. Omit for the six-year window's "
+            "own end, which is a date that was current when it was written"
+        ),
+    )
     args = parser.parse_args(argv)
-    print(json.dumps(build(args.staging_root, args.out_root), ensure_ascii=False, indent=2, sort_keys=True))
+    print(
+        json.dumps(
+            build(args.staging_root, args.out_root, window_end=args.window_end),
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        )
+    )
     return 0
 
 

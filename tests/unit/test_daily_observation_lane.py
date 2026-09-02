@@ -141,3 +141,59 @@ class TestTheLaneScriptSaysWhatItMustNotDo:
         text = LANE.read_text(encoding="utf-8")
         assert "failures.log" in text
         assert "exit /b 1" in text
+
+
+def prices_builder():
+    """`build_prices_actions` reaches Taiwan Core the same way `build_staging`
+    does, so it skips where that package is absent."""
+
+    try:
+        import build_prices_actions
+    except Exception as exc:  # noqa: BLE001
+        pytest.skip(f"build_prices_actions needs an operator-only module: {exc}")
+    return build_prices_actions
+
+
+SOURCE = (REPO / "scripts" / "m3" / "build_prices_actions.py").read_text(
+    encoding="utf-8"
+)
+
+
+class TestTheWindowEndIsNoLongerOnlyAConstant:
+    """The defect this override was added for.
+
+    `WINDOW`'s end was a date that was current when it was written. On
+    2026-09-02 a capture of the following month produced 43,603 staging rows
+    and **zero** price rows, because every session past 2026-08-03 was skipped
+    -- with no error, no warning, and no count.
+    """
+
+    def test_the_constant_still_ends_where_the_six_year_build_did(self):
+        """The override must not have moved the default. A rebuild without it
+        has to produce the same table it produced before."""
+
+        assert "WINDOW = (date(2019, 1, 1), date(2026, 8, 3))" in SOURCE
+
+    def test_build_prices_takes_an_end_and_defaults_to_none(self):
+        import inspect
+
+        sig = inspect.signature(prices_builder().build_prices)
+        assert sig.parameters["window_end"].default is None
+
+    def test_build_takes_the_same_override(self):
+        import inspect
+
+        sig = inspect.signature(prices_builder().build)
+        assert sig.parameters["window_end"].default is None
+
+    def test_a_dropped_session_is_counted_not_only_skipped(self):
+        """A decision that leaves no number behind is how 43,603 rows became 0
+        without anything saying so."""
+
+        assert "outside_window += 1" in SOURCE
+        assert '"sessions_outside_window": outside_window,' in SOURCE
+
+    def test_the_manifest_records_the_window_that_applied(self):
+        """A run with an override must not read as a run without one."""
+
+        assert '"end": (window_end or WINDOW[1]).isoformat(),' in SOURCE
