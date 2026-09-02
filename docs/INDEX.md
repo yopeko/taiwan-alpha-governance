@@ -90,6 +90,7 @@
 
 ## M7 巢狀驗證、候選與比較
 
+- [提案 002：判斷式研究軌道——賺錢也要分得出是運氣還是能力（待 Owner 裁決）](evidence/m7-proposal-002-discretionary-track-2026-09-02.md)
 - [提案 001：脫離風險式定量——完整規劃（待 Owner 裁決）](evidence/m7-proposal-001-sizing-basis-2026-09-02.md)
 - [診斷 004 結果：不可達，但網格找到一個兩軸都更好的地方](evidence/m7-diagnostic-004-reachability-result-2026-09-02.md)
 - [診斷計畫 004：現有的兩個槓桿夠不夠把 33.56% 推到 8%](evidence/m7-diagnostic-plan-004-reachability-2026-09-02.md)
