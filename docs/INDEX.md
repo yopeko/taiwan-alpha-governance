@@ -42,6 +42,8 @@
 - [M3.1 完成證據：耐久封存與 coverage ledger](evidence/m3-1-coverage-ledger-and-durable-archival-2026-08-16.md)
 - [一個寫死的窗口上界，出現在三支建表程式裡——第三支給的是錯答案不是缺資料](evidence/m3-hardcoded-window-end-2026-09-03.md)
 - [`tradability_state` 的分佈：unknown 是零，而那不等於資料完整](evidence/m3-tradability-distribution-2026-09-03.md)
+- [制度變更有沒有在窗口裡留下斷點：量了，沒有](evidence/m3-regime-continuity-2026-09-03.md)
+- [歷史來源回到哪一年：TWSE 2004、TPEx 2007](evidence/m3-history-reach-probe-2026-09-03.md)
 - [M3.10 減資公告日與停止買賣日](evidence/m3-10-reduction-announcement-linkage-2026-08-19.md)
 - [M3.11 TPEx 公司行動晉升 canonical 表](evidence/m3-11-tpex-actions-promotion-2026-08-19.md)
 - [M3.12 變更股票面額取得官方來源](evidence/m3-12-par-value-change-2026-08-19.md)

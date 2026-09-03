@@ -276,3 +276,86 @@ class TestTheWalkForwardExemptionIsWrittenDownNotAssumed:
 
         assert "只切開發區" in M0
         assert "開封" in M0
+
+
+class TestTheRegimeContinuityMeasurementDecidesOnOneMetric:
+    """A claim I made and then measured away.
+
+    I said the 2019-2026 window already crossed two structural changes with
+    nothing accounting for it. Crossing them on the calendar is a fact;
+    crossing them in the data had to be measured, and it was not there.
+    """
+
+    def test_the_deciding_metric_is_the_mechanism_sensitive_one(self):
+        import measure_regime_continuity as regime
+
+        assert regime.MECHANISM_SENSITIVE == "mean_shares_per_trade"
+        assert regime.MECHANISM_SENSITIVE in regime.METRICS
+
+    def test_activity_metrics_are_carried_but_do_not_decide(self):
+        """Continuous trading arrived in March 2020 and so did the COVID
+        crash. Transaction counts jump in a crash, so a metric that jumps has
+        two candidate causes and the date alone cannot separate them -- the
+        same confounding that made diagnostic 002's first answer wrong."""
+
+        import measure_regime_continuity as regime
+
+        assert "daily_transactions" in regime.METRICS
+        assert regime.MECHANISM_SENSITIVE != "daily_transactions"
+
+    def test_the_change_month_is_excluded_from_its_own_level_shift(self):
+        """Whatever else happened that month happened too. Including it lets a
+        one-month spike stand in for a level."""
+
+        medians = {f"2020-{m:02d}": 100.0 for m in range(1, 13)}
+        medians["2020-06"] = 1000.0
+        out = regime_module().level_shift(medians, "2020-06", window=3)
+        assert out["before_median"] == 100.0
+        assert out["after_median"] == 100.0
+        assert out["shift_pct"] == pytest.approx(0.0)
+
+    def test_a_level_shift_is_reported_against_the_typical_month(self):
+        """A shift smaller than the median month-to-month step is not a step,
+        so both numbers have to be in the report or the reader has nothing to
+        compare against."""
+
+        source = (
+            REPO / "scripts" / "m3" / "measure_regime_continuity.py"
+        ).read_text(encoding="utf-8")
+        assert '"median_monthly_step_pct"' in source
+        assert '"level_shift"' in source
+
+    def test_the_change_dates_are_marked_presumed(self):
+        """Neither effective date was verified against a published rule. The
+        conclusion does not depend on them -- a permanent shift is visible
+        whichever month it began in, and the scan covers every month -- but
+        the output must not read as though they were checked."""
+
+        import measure_regime_continuity as regime
+
+        for label in regime.PRESUMED_CHANGES.values():
+            assert "presumed" in label
+
+    def test_an_empty_series_is_refused_rather_than_reported_continuous(self):
+        import measure_regime_continuity as regime
+
+        with pytest.raises(SystemExit) as caught:
+            regime.build([REPO / "does-not-exist"])
+        assert "not an archive root" in str(caught.value)
+
+    def test_the_note_keeps_the_odd_lot_question_open(self):
+        """Whether an odd lot was executable intraday before the odd-lot
+        session opened is a rules question with an effective date, and daily
+        aggregates cannot answer it. M0 already carries it as a blocker."""
+
+        source = (
+            REPO / "scripts" / "m3" / "measure_regime_continuity.py"
+        ).read_text(encoding="utf-8")
+        assert "odd lot" in source
+        assert "rules question" in source
+
+
+def regime_module():
+    import measure_regime_continuity
+
+    return measure_regime_continuity
