@@ -123,6 +123,7 @@
 - [比較 001 結果：兩個候選誰都沒有勝出](evidence/m7-comparison-001-result-2026-08-28.md)
 - [比較計畫 001：12-1 動能 對 60 日低波動](evidence/m7-comparison-plan-001-2026-08-28.md)
 - [排名品質量測 001：動能的排序能力與零無法區分](evidence/rank-quality-001-2026-08-28.md)
+- [M0 §9.1 缺了三欄，而指數那一欄改變了控制 001 的結論](evidence/m7-benchmarks-and-cost-stress-2026-09-03.md)
 
 ## M9 Shadow 觀察
 

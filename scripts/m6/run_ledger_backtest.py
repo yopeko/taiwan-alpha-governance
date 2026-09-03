@@ -34,7 +34,7 @@ import hashlib
 import json
 import sys
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -601,6 +601,48 @@ def rank_only_signals(
     return signals
 
 
+# M0 section 8's cost table: "壓力測試 | 可變成本及滑價的 1.5、2、3 倍",
+# and "所有候選必須在相同成本模型下比較並通過至少 2 倍成本壓力後，才可由
+# `research` 申請進入 `validated`". Nothing implemented it, so no candidate
+# could have applied even if one had passed its own thresholds.
+# The ledger's own default, restated here so the multiplier has something to
+# multiply. Asserted against `Ledger.__init__` by a test rather than trusted:
+# a drift between the two would silently change the baseline every stressed
+# run is measured against.
+LEDGER_BASELINE_SLIPPAGE = Decimal("0.0020")
+
+COST_STRESS_MULTIPLIERS = (Decimal("1"), Decimal("1.5"), Decimal("2"), Decimal("3"))
+
+
+def stressed_costs(multiplier: Decimal) -> tuple[BrokerTerms, Decimal]:
+    """Multiply the rate-based costs, and only those.
+
+    **The minimum commission is deliberately not multiplied, and the sell tax
+    is not either.** M0 says "可變成本及滑價" -- variable costs and slippage.
+    The 20 TWD floor is not variable, and the 0.3% transaction tax is statute
+    rather than an assumption this project could be wrong about.
+
+    That choice matters more than it looks at the M0 scale, where the floor
+    is most of the cost: a stress test that leaves it alone is not stressing
+    the dominant term. It is stated here rather than buried so that someone
+    who disagrees can disagree with a specific decision. The reported
+    `minimum_commission_share_pct` says how much of the cost the untouched
+    floor accounted for, so the limit of the test is visible in its output.
+
+    `m4/rules.py` and `m5/ledger.py` are byte-identical mirrors of Taiwan Core
+    and are not edited: both the terms and the slippage rate are constructor
+    arguments, so the stress is applied from outside.
+    """
+
+    if multiplier <= 0:
+        raise SystemExit("cost multiplier must be positive")
+    base = BrokerTerms()
+    return (
+        replace(base, commission_rate=base.commission_rate * multiplier),
+        LEDGER_BASELINE_SLIPPAGE * multiplier,
+    )
+
+
 def run(
     dataset_root: Path,
     *,
@@ -615,9 +657,16 @@ def run(
     entry_rule: str = "breakout",
     stop_rule: str = "fixed",
     max_positions: int | None = None,
+    cost_multiplier: Decimal = Decimal("1"),
 ) -> dict[str, Any]:
     sessions, by_session = load_dataset(dataset_root)
-    ledger = Ledger(opening_cash=opening_cash, sessions=[date.fromisoformat(s) for s in sessions])
+    terms, slippage = stressed_costs(cost_multiplier)
+    ledger = Ledger(
+        opening_cash=opening_cash,
+        sessions=[date.fromisoformat(s) for s in sessions],
+        terms=terms,
+        slippage_rate=slippage,
+    )
 
     history: dict[tuple[str, str], list[dict]] = defaultdict(list)
     positions: dict[tuple[str, str], OpenPosition] = {}
@@ -1017,6 +1066,15 @@ def run(
         "assumptions": {
             "participation_rate": float(PARTICIPATION_RATE),
             "signal_on_close_fill_next_open": True,
+            # M0 section 8. A run at 1 is the baseline; 2 is the multiple a
+            # candidate has to survive before it may apply for `validated`.
+            "cost_multiplier": float(cost_multiplier),
+            "commission_rate": float(terms.commission_rate),
+            "slippage_rate": float(slippage),
+            # Not multiplied, and named so the omission is visible rather than
+            # discovered. See `stressed_costs`.
+            "minimum_commission_not_stressed": float(terms.minimum_commission),
+            "sell_tax_rate_not_stressed": float(terms.sell_tax_rate),
             "participation_rate": float(participation_rate),
             "universe": universe,
             "first_trading_session": first_trading_session,
@@ -1297,6 +1355,16 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--cost-multiplier",
+        type=Decimal,
+        default=Decimal("1"),
+        help=(
+            "multiply the rate-based costs and slippage. M0 section 8 requires "
+            "a candidate to survive 2 before it may apply for `validated`; the "
+            "20 TWD floor and the 0.3%% tax are not multiplied"
+        ),
+    )
+    parser.add_argument(
         "--ranking",
         choices=sorted(RANKINGS),
         default="",
@@ -1318,6 +1386,7 @@ def main(argv: list[str] | None = None) -> int:
         entry_rule=args.entry,
         stop_rule=args.stop_rule,
         max_positions=args.max_positions,
+        cost_multiplier=args.cost_multiplier,
     )
 
     if args.report_root:
