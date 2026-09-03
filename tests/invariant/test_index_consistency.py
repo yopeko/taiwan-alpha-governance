@@ -173,3 +173,53 @@ def test_readme_does_not_reintroduce_a_second_status_table():
             f"{path.name} carries milestone status rows again: {offenders[:2]}. "
             "The register is the only source of status."
         )
+
+
+def documents() -> list[Path]:
+    """Every markdown document, counted the way both READMEs count them."""
+
+    return sorted(DOCS.rglob("*.md"))
+
+
+def test_both_readmes_state_the_document_count_they_actually_have():
+    """A number in the outward entry point that nobody checks is a number that
+    goes stale, and this repository has named that shape often enough.
+
+    It was 86 in README until 2026-09-03 and 105 on disk. Nothing said so,
+    because a count is exactly the kind of claim that keeps reading as true.
+    """
+
+    # INDEX is excluded on purpose: it lists the documents rather than
+    # counting them, and the one document it does not list is itself.
+    total = len(documents())
+    for path in (README, README_EN):
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8")
+        assert str(total) in text, (
+            f"{path.name} does not carry the current document count {total}. "
+            f"Update the count rather than removing it -- it is one of the "
+            f"few things a reader can check in a minute."
+        )
+
+
+def test_the_index_lists_every_document_it_claims_to():
+    """The index's own entry count against what is on disk.
+
+    `test_every_evidence_document_is_referenced_by_an_index` checks that
+    nothing is orphaned. This checks the other direction: that the index has
+    not accumulated entries for documents that were deleted or renamed.
+    """
+
+    entries = [
+        line
+        for line in INDEX.read_text(encoding="utf-8").splitlines()
+        if line.startswith("- [")
+    ]
+    on_disk = {p.name for p in documents()}
+    dangling = [
+        line
+        for line in entries
+        if not any(name in line for name in on_disk)
+    ]
+    assert not dangling, f"index entries pointing at nothing: {dangling[:3]}"

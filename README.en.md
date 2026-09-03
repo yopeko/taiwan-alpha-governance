@@ -57,9 +57,9 @@ The data pipeline is only useful for Taiwan. None of the following is about Taiw
 
 | | After you clone |
 |---|---|
-| **811 tests** | **623 need nothing external and finish in 4 seconds.** The other 188 carry `needs_local_data`: they want the operator's warehouse and archives, and elsewhere they **skip with the reason printed** rather than pretending to pass. |
+| **957 tests** | **769 need nothing external and finish in 4 seconds.** The other 188 carry `needs_local_data`: they want the operator's warehouse and archives, and elsewhere they **skip with the reason printed** rather than pretending to pass. |
 | **59 scripts** | **None of them run.** All point at the unpublished `tw-sepa-screener` repository and at licensed vendor data. |
-| **86 documents** | All readable. **They are the substance of this repository.** |
+| **105 documents** | All readable. **They are the substance of this repository.** |
 
 ```bash
 python -m pytest -q -m "not needs_local_data"
@@ -83,7 +83,7 @@ In short: M0–M6 `complete`, M7 `pending` (prerequisites cleared, seal unopened
 
 ## Finding your way around
 
-**[The full index is docs/INDEX.md](docs/INDEX.md)** (86 documents). Start with three:
+**[The full index is docs/INDEX.md](docs/INDEX.md)** (105 documents). Start with three:
 
 1. [M0 project contract](docs/m0-project-contract.md) — market, capital, risk, prohibitions. Everything else presupposes it.
 2. [Milestone register](docs/milestone-register.md) — where the work is and what it is stuck on.
