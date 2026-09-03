@@ -140,3 +140,48 @@ class TestTheLedgerAgreesWithItsContract:
         first = row()
         second = row(existing=[first], rerun_reason="r")
         assert (first["trial_number"], second["trial_number"]) == (1, 2)
+
+
+class TestAMethodSwitchIsAlsoATrial:
+    """The second gap in section 1, closed 2026-09-03.
+
+    Four consecutive non-passes on the quantitative track were followed by
+    opening a discretionary one. That is section 2's "a result changed a
+    choice" with the search space moved from parameters to methods, and the
+    ledger held 127 rows and 7 selecting ones, every one parameter-level.
+
+    Proposal 002 section 14 named the gap in the proposal that created it,
+    which is the only reason it was not the eighth instance of finding this
+    afterwards.
+    """
+
+    def test_the_purpose_exists(self):
+        assert "method-selection" in ledger.PURPOSES
+
+    def test_it_cannot_be_recorded_as_having_influenced_nothing(self):
+        """Choosing a method is the choice. A method-selection that changed
+        nothing is a sentence that contradicts itself."""
+
+        with pytest.raises(SystemExit) as caught:
+            row(purpose="method-selection", influenced=False)
+        assert "contradiction" in str(caught.value)
+
+    def test_it_still_has_to_say_what_it_chose(self):
+        with pytest.raises(SystemExit) as caught:
+            row(purpose="method-selection", influenced=True, choice="")
+        assert "not saying anything" in str(caught.value)
+
+    def test_a_complete_one_is_accepted_and_spends_budget(self):
+        entry = row(
+            purpose="method-selection",
+            influenced=True,
+            choice="開判斷式研究軌道",
+        )
+        assert entry["purpose"] == "method-selection"
+        assert ledger.summarise([entry])["selection_budget_spent"] == 1
+
+    def test_the_summary_counts_it_under_its_own_purpose(self):
+        entry = row(
+            purpose="method-selection", influenced=True, choice="開判斷式研究軌道"
+        )
+        assert ledger.summarise([entry])["by_purpose"]["method-selection"] == 1

@@ -28,13 +28,28 @@ from typing import Any
 
 REPO = Path(__file__).resolve().parents[2]
 
-CONTRACT_VERSION = "trial-ledger-v1.1.0"
+CONTRACT_VERSION = "trial-ledger-v1.2.0"
 LEDGER_NAME = "development_trials.jsonl"
 # `diagnostic` added 2026-08-28. Section 1 said "a backtest" until the rank
 # quality measurement turned out to be neither a backtest nor exempt: no
 # positions, no fills, no cost model, and it still looked at the data and
 # changed how candidate 003 reads.
-PURPOSES = ("probe", "candidate", "sensitivity", "parameter-search", "diagnostic")
+# `method-selection` added 2026-09-03. Section 1 had a second gap the same
+# shape as the first: four consecutive non-passes on the quantitative track
+# were followed by opening a discretionary one, which is section 2's "a result
+# changed a choice" with the search space moved from parameters to methods.
+# The ledger held 127 rows and 7 selecting ones, all of them parameter-level.
+# A counter that only counts parameters makes "seven configurations tried"
+# visible and "the whole method swapped" invisible, and the second spends more
+# of the selection budget, not less.
+PURPOSES = (
+    "probe",
+    "candidate",
+    "sensitivity",
+    "parameter-search",
+    "diagnostic",
+    "method-selection",
+)
 RECORD_BASES = ("contemporaneous", "reconstructed")
 
 
@@ -92,6 +107,12 @@ def build_row(
         raise SystemExit(f"purpose must be one of {list(PURPOSES)}")
     if basis not in RECORD_BASES:
         raise SystemExit(f"record_basis must be one of {list(RECORD_BASES)}")
+    if purpose == "method-selection" and not influenced:
+        raise SystemExit(
+            "a method-selection with influenced_a_choice false is a "
+            "contradiction: choosing a method is the choice. Contract "
+            "section 1"
+        )
     if influenced and not choice:
         raise SystemExit(
             "influenced_a_choice is true but choice_made is empty. Saying a "

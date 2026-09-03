@@ -23,6 +23,7 @@ Nothing here blocks a decision. It only makes having made one survive.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import subprocess
@@ -33,7 +34,7 @@ from typing import Any
 
 REPO = Path(__file__).resolve().parents[2]
 
-CONTRACT_VERSION = "discretionary-research-v1.0.0"
+CONTRACT_VERSION = "discretionary-research-v1.1.0"
 JOURNAL_NAME = "decision_journal.jsonl"
 STAGES = ("thesis", "outcome")
 
@@ -151,6 +152,75 @@ def build_thesis(existing: list[dict], args, commit: str) -> dict[str, Any]:
     }
 
 
+def load_controls(path: Path, entry: str, exit_session: str) -> dict[str, Any]:
+    """The three numbers section 3.4 requires, read from a controls report.
+
+    v1.0.0 said "any one of them missing and the judgement is not complete"
+    and then gave the outcome stage nowhere to put them. A decision could be
+    recorded as finished carrying only its own return -- which is the single
+    thing section 0 says a person will always record -- and sections 7's
+    second and third criteria had no data at all. They were rules that could
+    not be evaluated.
+
+    The sessions are checked rather than trusted. A controls report for a
+    different window is a comparison against a different market, and it would
+    read as a real one.
+    """
+
+    if not path.is_file():
+        raise SystemExit(f"no controls report at {path}")
+    report = json.loads(path.read_text(encoding="utf-8"))
+
+    for field, expected in (("entry_session", entry), ("exit_session", exit_session)):
+        got = report.get(field)
+        if got != expected:
+            raise SystemExit(
+                f"the controls report covers {field}={got!r}, this outcome says "
+                f"{expected!r}. A comparison over a different window is not a "
+                f"comparison (contract section 3.4)"
+            )
+
+    mine = (report.get("picks") or {}).get("return_pct")
+    baskets = report.get("random_baskets") or {}
+    universe = (report.get("equal_weight_universe") or {}).get("return_pct")
+    percentile = baskets.get("percentile_of_picks")
+    median = baskets.get("median_pct")
+
+    absent = [
+        name
+        for name, value in (
+            ("picks return", mine),
+            ("random basket median", median),
+            ("random basket percentile", percentile),
+            ("equal-weight universe return", universe),
+        )
+        if value is None
+    ]
+    if absent:
+        raise SystemExit(
+            f"the controls report is missing {absent}. Contract section 3.4: "
+            f"any one of them absent and this is not a completed judgement"
+        )
+
+    # `considered_not_bought` is allowed to be absent -- section 5 permits an
+    # empty list. It is recorded as null rather than dropped, so a summary can
+    # tell "criterion three did not fire" from "criterion three had no sample".
+    not_bought = report.get("considered_not_bought")
+    return {
+        "report_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        "report_path": str(path),
+        "picks_return_pct": mine,
+        "random_basket_median_pct": median,
+        "percentile_of_picks": percentile,
+        "equal_weight_universe_pct": universe,
+        "considered_not_bought_pct": (
+            None if not not_bought else not_bought.get("return_pct")
+        ),
+        "eligible_universe_size": report.get("eligible_universe_size"),
+        "basket_size": report.get("basket_size"),
+    }
+
+
 def build_outcome(existing: list[dict], args, commit: str) -> dict[str, Any]:
     thesis = next(
         (
@@ -192,6 +262,12 @@ def build_outcome(existing: list[dict], args, commit: str) -> dict[str, Any]:
         "thesis_held": args.thesis_held,
         "thesis_evidence": args.thesis_evidence,
         "falsifier_fired": args.falsifier_fired,
+        # Contract section 3.4, made a required field in v1.1.0. Stored with
+        # the report's hash so the three numbers can be traced to the run that
+        # produced them rather than retyped.
+        "controls": load_controls(
+            Path(args.controls), args.entry_session, args.exit_session
+        ),
     }
 
 
@@ -234,6 +310,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--thesis-not-held", action="store_true")
     parser.add_argument("--thesis-evidence")
     parser.add_argument("--falsifier-fired", action="store_true")
+    parser.add_argument(
+        "--controls",
+        help=(
+            "path to a decision_controls.py report for the same window. "
+            "Required for an outcome, contract section 3.4"
+        ),
+    )
     args = parser.parse_args(argv)
 
     if args.stage == "thesis":
@@ -257,7 +340,10 @@ def main(argv: list[str] | None = None) -> int:
                 "the contract is for"
             )
         args.thesis_held = bool(args.thesis_held)
-        for name in ("entry_session", "exit_session", "exit_reason", "thesis_evidence"):
+        for name in (
+            "entry_session", "exit_session", "exit_reason", "thesis_evidence",
+            "controls",
+        ):
             if getattr(args, name) is None:
                 raise SystemExit(f"an outcome needs --{name.replace('_', '-')}")
 

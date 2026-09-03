@@ -2,8 +2,8 @@
 
 | 欄位 | 值 |
 |---|---|
-| 契約版本 | `trial-ledger-v1.1.0`（2026-08-28；§1 由「跑一次回測」放寬為「跑一次任何東西」，`purpose` 新增 `diagnostic`）|
-| 狀態 | `baseline-approved`，2026-08-28 |
+| 契約版本 | `trial-ledger-v1.2.0`（2026-09-03；`purpose` 新增 `method-selection`，見 §1 第二個缺口）|
+| 狀態 | `baseline-approved` v1.1.0（2026-08-28）；**v1.2.0 的修訂待 Owner 追認** |
 | 用途 | 記錄每一次在開發區上跑過的組態，以及它有沒有影響過任何選擇 |
 | 核准 | Product Owner（單一簽核人）|
 
@@ -30,6 +30,20 @@
 一個只數回測的計數器，會把「看資料」與「用資料交易」當成同一件事的兩種形式，而多重比較累積於前者不是後者。
 
 `purpose` 因此新增 `diagnostic`。
+
+### 第二個缺口，2026-09-03 補上
+
+同一句措辭還漏掉一種東西，而它比前一種大：**改換研究方法本身**。
+
+到 2026-09-02 為止，量化軌道連續四次沒有通過（[比較 001](../evidence/m7-comparison-001-result-2026-08-28.md)、[對照 001](../evidence/m7-control-001-result-2026-09-01.md)、[診斷 002](../evidence/m7-diagnostic-002-halt-rules-result-2026-09-01.md)、[診斷 004](../evidence/m7-diagnostic-004-reachability-result-2026-09-02.md)），其後開了[判斷式研究軌道](discretionary-research-contract.md)。
+
+**那是 §2 定義的「一次結果影響了一個選擇」，只是搜尋空間從參數變成方法。** 而登錄檔當時 127 列、7 列 `influenced_a_choice: true`，**全部是參數層級**，沒有一列說出這件事——[提案 002](../evidence/m7-proposal-002-discretionary-track-2026-09-02.md) §14 自己指出了這個缺口。
+
+一個只數參數的計數器，會讓「換了七組參數」看得見，而「換了整套方法」看不見——**後者消耗的選擇預算更大，不是更小。**
+
+`purpose` 因此新增 `method-selection`。這種列不是一次執行，它的 `dataset` 記的是**促成該選擇的那些結果所依據的資料集**，`result_pointer` 指向提案本身。
+
+**這種列的 `influenced_a_choice` 只能是 `true`。** 一次沒有影響任何選擇的方法選擇不存在——那句話自我矛盾。
 
 ## 2. 但不是每次試驗都增加多重比較
 

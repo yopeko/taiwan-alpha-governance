@@ -39,6 +39,48 @@ def thesis_args(**over):
     return SimpleNamespace(**base)
 
 
+# A controls report of the shape `decision_controls.py` prints. Contract
+# section 3.4 made these three numbers required at the outcome stage in
+# v1.1.0, so every outcome in these tests has to carry one.
+CONTROLS_REPORT = {
+    "contract_version": "discretionary-research-v1.1.0",
+    "entry_session": "2026-09-02",
+    "exit_session": "2027-09-02",
+    "basket_size": 1,
+    "eligible_universe_size": 1743,
+    "picks": {"return_pct": 30.0},
+    "random_baskets": {
+        "median_pct": 28.0,
+        "percentile_of_picks": 75.0,
+        "returns_pct": [28.0],
+    },
+    "equal_weight_universe": {"return_pct": 26.0},
+    "considered_not_bought": None,
+}
+
+_CONTROLS_PATH: Path | None = None
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _controls_report(tmp_path_factory):
+    """One report on disk for the whole module, because every outcome needs
+    one and the recorder reads it by path and hashes the bytes."""
+
+    global _CONTROLS_PATH
+    path = tmp_path_factory.mktemp("controls") / "report.json"
+    path.write_text(json.dumps(CONTROLS_REPORT), encoding="utf-8")
+    _CONTROLS_PATH = path
+    yield
+
+
+def write_controls(tmp_path, **over) -> Path:
+    report = dict(CONTROLS_REPORT)
+    report.update(over)
+    path = tmp_path / "report.json"
+    path.write_text(json.dumps(report), encoding="utf-8")
+    return path
+
+
 def outcome_args(**over):
     base = dict(
         decision_id="d-001",
@@ -48,6 +90,7 @@ def outcome_args(**over):
         thesis_held=True,
         thesis_evidence="兩季毛利率皆高於 50%",
         falsifier_fired=False,
+        controls=str(_CONTROLS_PATH),
     )
     base.update(over)
     return SimpleNamespace(**base)
@@ -347,3 +390,169 @@ class TestTheSnapshotSaysWhichClaimItIsMaking:
         b = json.loads(second.read_text(encoding="utf-8"))
         assert a["universe_sha256"] == b["universe_sha256"]
         assert a["captured_at"] != b["captured_at"] or True
+
+
+class TestAnOutcomeCarriesTheThreeNumbers:
+    """Contract section 3.4, made executable in v1.1.0.
+
+    v1.0.0 said "any one of them absent and this is not a completed judgement"
+    and gave the outcome stage nowhere to put them. A decision could be
+    recorded as finished carrying only its own return -- the one thing section
+    0 says a person will always record -- and section 7's second and third
+    criteria had nothing to be computed from. They were rules that could not
+    be evaluated.
+    """
+
+    def test_the_three_numbers_reach_the_row(self):
+        rows = [journal.build_thesis([], thesis_args(), "abc1234")]
+        row = journal.build_outcome(rows, outcome_args(), "abc1234")
+        controls = row["controls"]
+        assert controls["picks_return_pct"] == 30.0
+        assert controls["random_basket_median_pct"] == 28.0
+        assert controls["equal_weight_universe_pct"] == 26.0
+        assert controls["percentile_of_picks"] == 75.0
+
+    def test_the_report_is_named_by_its_hash_not_retyped(self):
+        """The numbers have to be traceable to the run that produced them."""
+
+        rows = [journal.build_thesis([], thesis_args(), "abc1234")]
+        row = journal.build_outcome(rows, outcome_args(), "abc1234")
+        assert len(row["controls"]["report_sha256"]) == 64
+
+    @pytest.mark.parametrize(
+        "drop, missing",
+        [
+            ("picks", "picks return"),
+            ("equal_weight_universe", "equal-weight universe return"),
+        ],
+    )
+    def test_a_missing_number_is_refused(self, tmp_path, drop, missing):
+        rows = [journal.build_thesis([], thesis_args(), "abc1234")]
+        path = write_controls(tmp_path, **{drop: {}})
+        with pytest.raises(SystemExit) as caught:
+            journal.build_outcome(rows, outcome_args(controls=str(path)), "abc1234")
+        assert missing in str(caught.value)
+
+    def test_a_report_for_a_different_window_is_refused(self, tmp_path):
+        """A comparison over a different window is not a comparison, and it
+        would read as a real one."""
+
+        rows = [journal.build_thesis([], thesis_args(), "abc1234")]
+        path = write_controls(tmp_path, exit_session="2027-06-30")
+        with pytest.raises(SystemExit) as caught:
+            journal.build_outcome(rows, outcome_args(controls=str(path)), "abc1234")
+        assert "different window" in str(caught.value)
+
+    def test_an_empty_not_bought_list_records_null_rather_than_zero(self):
+        """Section 5 allows it to be empty. Zero would enter criterion three as
+        a real observation of no return."""
+
+        rows = [journal.build_thesis([], thesis_args(), "abc1234")]
+        row = journal.build_outcome(rows, outcome_args(), "abc1234")
+        assert row["controls"]["considered_not_bought_pct"] is None
+
+    def test_the_return_is_not_a_field_someone_types_next_to_the_judgement(self):
+        """Section 1.2: `thesis_held` and the P&L may never be derived from one
+        another. Both are recorded -- the 2x2 needs both -- but the return
+        arrives inside a hashed controls report, not as a bare number a person
+        fills in beside the judgement they are making."""
+
+        rows = [journal.build_thesis([], thesis_args(), "abc1234")]
+        row = journal.build_outcome(rows, outcome_args(), "abc1234")
+        assert not [k for k in row if "profit" in k or "pnl" in k or "return" in k]
+        assert row["controls"]["report_sha256"]
+
+
+import review_decisions as review  # noqa: E402
+
+
+def completed(n, held=True, mine=30.0, percentile=75.0, not_bought=None):
+    rows = []
+    for i in range(n):
+        rows.append({"decision_id": f"d-{i}", "stage": "thesis"})
+        rows.append(
+            {
+                "decision_id": f"d-{i}",
+                "stage": "outcome",
+                "thesis_held": held,
+                "controls": {
+                    "picks_return_pct": mine,
+                    "percentile_of_picks": percentile,
+                    "considered_not_bought_pct": not_bought,
+                },
+            }
+        )
+    return rows
+
+
+class TestTheCriteriaAreComputedNotRemembered:
+    """Contract section 7 and proposal 002 section 9. Three criteria fixed in
+    advance are half of the argument; something that computes them without
+    being asked to be kind is the other half."""
+
+    def test_no_verdict_before_twenty_but_the_numbers_still_print(self):
+        """Hiding the numbers until the threshold would leave someone unable to
+        see which way they are heading at decision nineteen."""
+
+        checks = review.criteria(review.pair(completed(19, held=False)))
+        assert checks["verdict_available"] is False
+        assert checks["decisions_until_verdict"] == 1
+        assert checks["one_thesis_hit_rate"]["value_pct"] == 0.0
+        assert checks["one_thesis_hit_rate"]["fires"] is None
+
+    def test_at_twenty_a_coin_flip_hit_rate_fires_criterion_one(self):
+        """Ten theses held, ten not. The contract fixes 50% as the threshold
+        because that is what a coin does."""
+
+        rows = completed(10, held=True)
+        for row in completed(10, held=False):
+            row["decision_id"] = row["decision_id"].replace("d-", "e-")
+            rows.append(row)
+        checks = review.criteria(review.pair(rows))
+        assert checks["completed_decisions"] == 20
+        assert checks["one_thesis_hit_rate"]["value_pct"] == 50.0
+        assert checks["one_thesis_hit_rate"]["fires"] is True
+
+    def test_the_luck_cell_is_counted(self):
+        """Section 6: thesis wrong and money made. Nobody goes back and asks
+        after a profitable trade, which is why it is counted first."""
+
+        cells = review.two_by_two(review.pair(completed(3, held=False, mine=30.0)))
+        assert cells["luck"] == 3
+        assert cells["skill"] == 0
+
+    def test_thesis_right_and_money_lost_is_its_own_cell(self):
+        cells = review.two_by_two(review.pair(completed(2, held=True, mine=-10.0)))
+        assert cells["thesis_held_but_lost"] == 2
+        assert cells["correctly_punished"] == 0
+
+    def test_criterion_three_says_how_many_decisions_it_had(self):
+        """Section 5 allows an empty not-bought list, so this criterion can be
+        short of samples while the other two are complete. "Did not fire" and
+        "had nothing to fire on" look identical unless the count is printed."""
+
+        checks = review.criteria(review.pair(completed(20, not_bought=None)))
+        three = checks["three_not_bought_beat_bought"]
+        assert three["samples"] == 0
+        assert three["decisions_without_a_not_bought_list"] == 20
+        assert three["fires"] is None
+
+    def test_criterion_three_fires_when_the_names_passed_over_did_better(self):
+        checks = review.criteria(
+            review.pair(completed(20, mine=5.0, not_bought=12.0))
+        )
+        three = checks["three_not_bought_beat_bought"]
+        assert three["samples"] == 20
+        assert three["fires"] is True
+
+    def test_a_thesis_with_no_outcome_is_open_not_completed(self):
+        rows = completed(2) + [{"decision_id": "d-open", "stage": "thesis"}]
+        assert len(review.pair(rows)) == 2
+
+    def test_an_absent_journal_is_refused_rather_than_reported_clean(self, tmp_path):
+        with pytest.raises(SystemExit) as caught:
+            review.load(tmp_path)
+        assert "has not started" in str(caught.value)
+
+    def test_the_threshold_is_the_one_the_contract_fixed(self):
+        assert review.VERDICT_AFTER == 20
