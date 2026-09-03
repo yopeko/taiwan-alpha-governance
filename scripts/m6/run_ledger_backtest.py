@@ -459,8 +459,38 @@ class OpenPosition:
     peak_high: Decimal = Decimal("0")
 
 
+# The twelve columns this driver actually reads, out of the dataset's
+# twenty-three. Projected at read time rather than carried and ignored.
+#
+# Measured 2026-09-04 on dataset-10 (3,928,820 rows): the whole table costs
+# 6.7 GB as Python dicts against 1.3 GB as Arrow, and reading all twenty-three
+# columns to use twelve is most of the difference. On a 32 GB machine that is
+# the reason two background jobs were killed on 2026-09-03.
+#
+# **Listed rather than derived.** A column read through `.get()` somewhere
+# this list forgot would arrive as `None` and be indistinguishable from a
+# genuinely absent value -- so `DATASET_COLUMNS` is asserted against the
+# driver's own source by a test, which fails loudly instead.
+DATASET_COLUMNS = (
+    "market",
+    "symbol",
+    "session_date",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "session_state",
+    "tradability_state",
+    "limit_up",
+    "limit_down",
+)
+
+
 def load_dataset(root: Path) -> tuple[list[str], dict[str, dict[tuple[str, str], dict]]]:
-    table = pq.read_table(root / "research_dataset.parquet")
+    table = pq.read_table(
+        root / "research_dataset.parquet", columns=list(DATASET_COLUMNS)
+    )
     by_session: dict[str, dict[tuple[str, str], dict]] = defaultdict(dict)
     for row in table.to_pylist():
         by_session[row["session_date"]][(row["market"], row["symbol"])] = row
