@@ -25,10 +25,17 @@ REM through the same builders is 9 seconds plus 1, measured 2026-09-01 on an
 REM existing archive. The capture itself is bounded by the 6-second politeness
 REM interval, so a day is minutes.
 REM
-REM Register with Windows Task Scheduler (as the logged-in user, daily at
-REM 18:00, after both markets have published):
+REM Registered 2026-09-03 (D24) as `tw-alpha-m9-observation`, daily at
+REM **18:30** -- not the 18:00 this comment used to say.
 REM
-REM   schtasks /Create /TN "tw-alpha-m9-observation" /SC DAILY /ST 18:00 ^
+REM `tw-alpha-daily-status` has held 18:00 since 2026-08-22 and it also
+REM captures from the exchanges. Two capture lanes starting together defeats
+REM the per-lane politeness interval, and a 0.7-second interval once had this
+REM machine's address refused by twse.com.tw for more than a day. The status
+REM snapshot is eight sources and finishes in under a minute; half an hour is
+REM more clearance than it needs, and clearance is the cheap side.
+REM
+REM   schtasks /Create /TN "tw-alpha-m9-observation" /SC DAILY /ST 18:30 ^
 REM     /TR "\"%~f0\"" /F
 REM
 REM Safe to run on a non-trading day: the capture preserves the exchange's

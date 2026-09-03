@@ -46,9 +46,20 @@ WAREHOUSE_ROOTS = {
 # candidate report since has used dataset-09, so the invariant tests were
 # validating a dataset nothing else touched -- the same shape this file was
 # created to stop, one generation later.
-RESEARCH_DATASET = SCRATCH / "tw-alpha-m6-dataset-09"
-RESEARCH_DATASET_GENERATION = "2026-08-25 six-year build, 1,840 sessions"
-RESEARCH_DATASET_PRICES = SCRATCH / "tw-alpha-m3-pit-prices-12"
+RESEARCH_DATASET = SCRATCH / "tw-alpha-m6-dataset-10"
+RESEARCH_DATASET_GENERATION = "2026-09-03 window extended, 1,862 sessions"
+RESEARCH_DATASET_PRICES = SCRATCH / "tw-alpha-m3-pit-prices-13"
+
+# The sealed split derived from RESEARCH_DATASET. Named here for the reason
+# everything else in this file is: it was passed as `--out-root` at call time
+# and then referred to by name in five evidence documents, which is the same
+# shape as the five test files that each pinned their own warehouse path.
+#
+# split-01 came from dataset-09 and stays on disk, because every candidate
+# result so far was run on it. Moving the pointer without regenerating would
+# have left the sealed half at 382 sessions while this file said 404.
+SEALED_SPLIT = SCRATCH / "tw-alpha-m7-split-02"
+SEALED_SPLIT_GENERATION = "2026-09-03 from dataset-10, 1,458 development / 404 sealed"
 
 # The candidate report the ADR-0002 contract tests read. Named here for the
 # same reason as everything else in this file: five test files once each

@@ -16,10 +16,15 @@ import sys
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "tests"))
 
-# Deliberately the pre-rebuild generation. M6 has not been re-run for the
-# six-year window, so this dataset and the warehouse it was derived from are
-# a matched pair; swapping in the new prices table would compare 382 sessions
-# against 1,840 and read the difference as a defect.
+# A matched pair: the dataset and the prices table it was derived from move
+# together, or a test comparing them reads a generation gap as a defect.
+#
+# Moved to dataset-10 / pit-prices-13 on 2026-09-03 (D24). The development
+# half is not byte-identical to dataset-09's -- it gained 2,916 rows, which
+# are two out-of-scope securities across all 1,458 sessions, every row
+# `ineligible` with a reason and no close. The **eligible** rows are identical:
+# 2,429,932 on both, same keys and same values. So earlier candidate results
+# stay comparable, and that was checked rather than assumed.
 from warehouse import (  # noqa: E402
     RESEARCH_DATASET as DATASET,
     RESEARCH_DATASET_PRICES,
@@ -377,19 +382,19 @@ class TestTheDatasetIsReproducible:
         assert manifest["sha256"] == hashlib.sha256(path.read_bytes()).hexdigest()
 
     def test_it_covers_the_whole_m3_window(self, manifest):
-        """382 sessions until the six-year rebuild landed on 2026-08-25.
+        """382 sessions until the six-year rebuild, 1,840 until 2026-09-03.
 
         Pinned rather than derived on purpose: this is the test that notices
         the dataset silently changing size. It stayed at 382 for two days
         after the rebuild because nothing pointed it at the new build.
         """
 
-        assert manifest["sessions"] == 1840
+        assert manifest["sessions"] == 1862
         assert manifest["window"]["start"] == "2019-01-02"
-        assert manifest["window"]["end"] == "2026-08-03"
+        assert manifest["window"]["end"] == "2026-09-02"
 
     def test_the_warmup_limit_is_stated_rather_than_left_to_be_discovered(self, manifest):
-        """1,840 sessions minus a 250-session warmup leaves about 1,590.
+        """1,862 sessions minus a 250-session warmup leaves about 1,610.
 
         The 382-session build left 132, which was not enough to conclude
         anything and was the stated reason M6 could not produce a strategy

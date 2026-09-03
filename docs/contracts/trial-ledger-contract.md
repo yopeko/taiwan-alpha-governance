@@ -3,7 +3,7 @@
 | 欄位 | 值 |
 |---|---|
 | 契約版本 | `trial-ledger-v1.2.0`（2026-09-03；`purpose` 新增 `method-selection`，見 §1 第二個缺口）|
-| 狀態 | `baseline-approved` v1.1.0（2026-08-28）；**v1.2.0 的修訂待 Owner 追認** |
+| 狀態 | **`baseline-approved` v1.2.0，2026-09-03**（[D24](../evidence/m3-owner-decision-d24-2026-09-03.md)）。v1.1.0 於 2026-08-28 核准 |
 | 用途 | 記錄每一次在開發區上跑過的組態，以及它有沒有影響過任何選擇 |
 | 核准 | Product Owner（單一簽核人）|
 
