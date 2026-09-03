@@ -21,6 +21,7 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "scripts" / "m3"))
 sys.path.insert(0, str(REPO / "scripts" / "m6"))
+sys.path.insert(0, str(REPO / "scripts" / "m7"))
 
 import benchmarks  # noqa: E402
 import build_index_benchmarks as index_builder  # noqa: E402
@@ -359,3 +360,125 @@ def regime_module():
     import measure_regime_continuity
 
     return measure_regime_continuity
+
+
+class TestTheStopFillBoundUsesTheStopThatWasSubmitted:
+    """The first version of this measurement used the wrong reference.
+
+    `entry x (1 - stop_pct)` is not the stop the order carried: the stop is
+    set from the signal session's price and the position is entered at the
+    next session's. That difference is the defect diagnostic 003 already
+    found, and using it here folded the old defect into the new number and
+    reported the sum as fill quality.
+    """
+
+    def bound_module(self):
+        import bound_stop_fill_with_bars
+
+        return bound_stop_fill_with_bars
+
+    def run(self, exit_price, opened, low, quantity=100):
+        return {
+            "opening_cash": 100000.0,
+            "strategy": {"stop_pct": 0.08},
+            "trades": [
+                {
+                    "market": "TWSE",
+                    "symbol": "A",
+                    "exit_session": "D",
+                    "exit_reason": "stop",
+                    "entry_price": 100.0,
+                    "exit_price": exit_price,
+                    "quantity": quantity,
+                }
+            ],
+        }, {("TWSE", "A", "D"): {"open": opened, "low": low, "high": max(opened, 999.0)}}
+
+    def test_the_submitted_stop_is_recovered_from_the_recorded_fill(self):
+        """The ledger wrote `stop x (1 - slippage)`, so dividing it back out
+        gives the price the order actually carried."""
+
+        source = (
+            REPO / "scripts" / "m7" / "bound_stop_fill_with_bars.py"
+        ).read_text(encoding="utf-8")
+        assert "modelled_fill / (1 - slippage)" in source
+        assert "entry_price" not in source.split("def bound(")[1].split("def main(")[0]
+
+    def test_a_session_that_did_not_gap_can_fill_at_the_stop(self):
+        """Opening above the stop means the price fell through it during the
+        session, so the stop itself was available.
+
+        The best case then comes out **better** than the model by exactly the
+        slippage rate, because the model charges 0.20% and a fill at the stop
+        does not. That is the model being conservative on this subset, and it
+        is why the momentum run's -6.23% is a net figure: the gap cost is
+        larger than that gross, offset by this on the sessions that did not
+        gap.
+        """
+
+        module = self.bound_module()
+        result, bars = self.run(exit_price=91.818, opened=95.0, low=88.0)
+        out = module.bound(result, bars, 0.002)
+        assert out["gapped_through_the_stop_at_open"] == 0
+        better = out["proceeds_vs_the_model_pct_of_opening_nav"][
+            "best_case_fill_at_stop_or_open"
+        ]
+        # 100 shares at ~92, 0.2% of that, against 100,000 opening cash.
+        assert better == pytest.approx(92.0 * 100 * 0.002 / 100000 * 100, rel=0.02)
+
+    def test_a_gapped_open_makes_even_the_best_case_worse_than_the_model(self):
+        """The model assumes a fill at a price the session never traded.
+
+        This is the whole finding: 21% of the momentum run's stops gapped, and
+        that puts a floor of 6.23% of opening NAV under the error with no new
+        data needed to establish it.
+        """
+
+        module = self.bound_module()
+        result, bars = self.run(exit_price=91.818, opened=85.0, low=80.0)
+        out = module.bound(result, bars, 0.002)
+        assert out["gapped_through_the_stop_at_open"] == 1
+        assert (
+            out["proceeds_vs_the_model_pct_of_opening_nav"][
+                "best_case_fill_at_stop_or_open"
+            ]
+            < 0
+        )
+
+    def test_the_band_is_labelled_a_bound_and_not_a_distribution(self):
+        """A stop order does not systematically fill at the session low. The
+        band says daily bars cannot locate the truth inside it, not that the
+        worst end is likely."""
+
+        module = self.bound_module()
+        result, bars = self.run(exit_price=91.818, opened=95.0, low=80.0)
+        out = module.bound(result, bars, 0.002)
+        assert out["band_width_pct_of_opening_nav"] > 0
+        assert "not a distribution" in out["reading_note"]
+
+    def test_an_impossible_bar_is_reported_rather_than_clamped(self):
+        """An open below the published low cannot happen. Agreeing with it
+        would hide a data defect inside a measurement."""
+
+        module = self.bound_module()
+        result, bars = self.run(exit_price=91.818, opened=70.0, low=90.0)
+        out = module.bound(result, bars, 0.002)
+        assert out["stops_without_a_comparable_bar"] == 1
+        assert out["stops_priced"] == 0
+
+    def test_a_run_with_no_stops_is_refused(self):
+        module = self.bound_module()
+        import json
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".json", delete=False, encoding="utf-8"
+        ) as handle:
+            json.dump(
+                {"opening_cash": 1.0, "strategy": {"stop_pct": 0.08}, "trades": []},
+                handle,
+            )
+            path = handle.name
+        with pytest.raises(SystemExit) as caught:
+            module.main(["--run", path, "--dataset", str(REPO)])
+        assert "read as agreement" in str(caught.value)
