@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| 狀態 | **`awaiting-owner-approval`。未執行。** |
+| 狀態 | **`executed`（2026-09-02）**，[結果](m7-diagnostic-004-reachability-result-2026-09-02.md)。試驗 #116–#127，計畫提交於 `70a6a46`，12 次執行全部在其後 |
 | 類型 | `parameter-search`。**這是一個可行性問題，不是一次選擇**——見 §5 |
 | 資料 | 開發區 `tw-alpha-m7-split-01/development`，`128619cc…` |
 | 封存區 | 不涉及。**開封次數維持 0** |
