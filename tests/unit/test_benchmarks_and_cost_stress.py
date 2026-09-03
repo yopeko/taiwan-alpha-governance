@@ -214,3 +214,65 @@ class TestTheCostStressM0MakesAPrecondition:
             '"sell_tax_rate_not_stressed"',
         ):
             assert field in source
+
+
+class TestTheWalkForwardExemptionIsWrittenDownNotAssumed:
+    """D25. M0 section 9.1 required walk-forward folds and the nested
+    validation contract said it could not be done; both were
+    `baseline-approved`, so the real state was a requirement never satisfied
+    and never exempted, with nothing counting it.
+    """
+
+    NESTED = (
+        REPO / "docs" / "contracts" / "nested-validation-contract.md"
+    ).read_text(encoding="utf-8")
+
+    def test_m0_carries_the_exemption_and_its_threshold(self):
+        assert "§9.1.1" in M0
+        assert "1,650" in M0
+        assert "walk-forward-folds-exempt" in M0
+
+    def test_the_four_release_parameters_are_fixed_in_advance(self):
+        """Fixed now rather than at implementation time, for the same reason a
+        candidate plan fixes its thresholds before the run: a reading rule
+        chosen after the results cannot be told from one chosen to suit them."""
+
+        for phrase in ("錨定擴張窗口", "21 個場次", "只切開發區", "250 筆"):
+            assert phrase in M0, phrase
+
+    def test_the_purge_covers_the_longest_holding_period(self):
+        """21 is not a round number. `max_holding_sessions` is 20, so a
+        position opened on the last training session can still be open 20
+        sessions into validation."""
+
+        import run_ledger_backtest as backtest
+        import inspect
+
+        longest = inspect.signature(backtest.run).parameters
+        assert "max_holding_sessions" in longest
+        assert "max_holding_sessions = 20" in M0
+
+    def test_the_exemption_says_it_will_not_expire_on_its_own(self):
+        """The development half is bounded at both ends -- 2019-01-01 and the
+        day before `SEAL_FROM` -- so it is 1,458 sessions permanently and time
+        passing only lengthens the sealed half. The exemption is an IOU with a
+        task attached, not one with a due date, and it has to say so or someone
+        will wait for it."""
+
+        assert "回補" in M0
+        assert "兩端都固定" in M0
+
+    def test_both_contracts_point_at_each_other(self):
+        """The conflict was invisible because each document was internally
+        consistent. Neither may now be read without the other."""
+
+        assert "D25" in self.NESTED
+        assert "9.1.1" in self.NESTED
+        assert "nested-validation-contract" in M0
+
+    def test_the_folds_never_reach_the_sealed_region(self):
+        """Every fold rolled over the sealed half would be an opening, and it
+        does not regenerate."""
+
+        assert "只切開發區" in M0
+        assert "開封" in M0

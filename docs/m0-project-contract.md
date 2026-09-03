@@ -5,7 +5,7 @@
 | 欄位 | 值 |
 |---|---|
 | 專案 ID | `tw-alpha-platform` |
-| 契約版本 | `m0-v1.7.0`（2026-09-02；§2.1 承認候選的第二個來源——人的判斷，驗證要求相同，見 [D23](evidence/m3-owner-decision-d23-2026-09-02.md)。v1.6.0 見 [D21](evidence/m3-owner-decision-d21-2026-09-01.md)：§8 補上名額的第二個耦合——名額同時決定部位大小，而部位大小決定最低手續費咬不咬得到，見 [D21](evidence/m3-owner-decision-d21-2026-09-01.md)。v1.5.0 見 [D20](evidence/m3-owner-decision-d20-2026-08-29.md)；v1.4.0 見 [D19](evidence/m3-owner-decision-d19-2026-08-29.md)；v1.3.0 見 [D18](evidence/m3-owner-decision-d18-2026-08-28.md)；v1.2.0 見 [D17](evidence/m3-owner-decision-d17-2026-08-27.md)；v1.1.0 見 [D16](evidence/m3-owner-decision-d16-2026-08-25.md)）|
+| 契約版本 | `m0-v1.8.0`（2026-09-03；§9.1.1 為 walk-forward folds 加豁免，並預先寫定解除後的四個參數，見 [D25](evidence/m3-owner-decision-d25-2026-09-03.md)。v1.7.0 見下：2026-09-02；§2.1 承認候選的第二個來源——人的判斷，驗證要求相同，見 [D23](evidence/m3-owner-decision-d23-2026-09-02.md)。v1.6.0 見 [D21](evidence/m3-owner-decision-d21-2026-09-01.md)：§8 補上名額的第二個耦合——名額同時決定部位大小，而部位大小決定最低手續費咬不咬得到，見 [D21](evidence/m3-owner-decision-d21-2026-09-01.md)。v1.5.0 見 [D20](evidence/m3-owner-decision-d20-2026-08-29.md)；v1.4.0 見 [D19](evidence/m3-owner-decision-d19-2026-08-29.md)；v1.3.0 見 [D18](evidence/m3-owner-decision-d18-2026-08-28.md)；v1.2.0 見 [D17](evidence/m3-owner-decision-d17-2026-08-27.md)；v1.1.0 見 [D16](evidence/m3-owner-decision-d16-2026-08-25.md)）|
 | 狀態 | `baseline-approved-for-planning` |
 | 生效日 | 2026-08-02 |
 | 時區 | `Asia/Taipei` |
@@ -265,12 +265,41 @@ v1.1.0 以前此處寫的是「取得實際券商費率、最低費用及零股�
 - 歷史日期及 Point-in-time 股票池；
 - 初始資金、持股數、再平衡時間及交易限制；
 - 成本、滑價、拒單及成交模型；
-- walk-forward folds、gap／purge 及 sealed OOS；
+- walk-forward folds、gap／purge 及 sealed OOS（**walk-forward folds 目前豁免，見 §9.1.1**）；
 - 報酬、回撤、成本、容量及曝險報表。
 
 最低比較組包含現金、適當市場指數或 ETF benchmark、合資格股票池等權、equal-size same-pool random selection、簡單動能／相對強度策略、目前 champion 及 challenger。
 
 使用 `training -> validation -> gap/purge -> sealed OOS`。任何已被查看並用於選模的 OOS 不得繼續標為 sealed OOS。一次只改一個主要假說，按策略 family 及 funnel stage 稽核，使用同一協定重跑。更多候選、較高樣本內分數或單一好年份不是升級證據。
+
+#### 9.1.1 walk-forward folds 的豁免（`m0-v1.8.0`，[D25](evidence/m3-owner-decision-d25-2026-09-03.md)）
+
+**本節要求 walk-forward folds，而[巢狀驗證契約](contracts/nested-validation-contract.md) §6 自己寫著辦不到**——「這是一次留出法，不是巢狀交叉驗證……場次不夠切成多折還讓每折有足夠交易」。兩份契約都是 `baseline-approved`，所以在 2026-09-03 之前的真實狀態是：**本節有一條要求從未被滿足，也從未被豁免。**
+
+**豁免：開發區達到 1,650 個場次之前，walk-forward folds 以單次留出法代替，且每份候選報告必須標明 `walk-forward-folds-exempt`。**
+
+豁免同時預先寫定它解除之後要用的參數，理由與候選計畫相同——**判讀規則若在看到結果之後才訂，就無法區分「訂了公平的規則」與「訂了讓數字好看的規則」**：
+
+| 參數 | 值 | 理由 |
+|---|---|---|
+| 切法 | **錨定擴張窗口**（熱身只付一次）| 獨立折要付四次 252 場熱身，k=4 每折只剩 91 個可交易場次、約 33 筆交易 |
+| `gap/purge` | **21 個場次** | `max_holding_sessions = 20`，一個在訓練段最後一天開的部位最多還會活 20 場進入驗證段。21 剛好蓋住 |
+| folds 的範圍 | **只切開發區** | 滾過封存區的每一折都是一次開封，而封存區不會再生 |
+| 每折最少完成交易 | **250 筆** | 候選 006 在開發區完成 438（臂 D）與 533（臂 B）筆。**一折若比它取代的單次評估少一個量級，那不是更強的檢驗，是更弱的檢驗重複多次** |
+
+**1,650 這個數字的來源，以及它為什麼不會自己到達：**
+
+開發區是 2019-01-01 至 2024-12-31，**兩端都固定**——起點是倉庫窗口的起點，終點是 `SEAL_FROM = 2025-01-01` 的前一天。所以它是 **1,458 個場次，永久**；時間往前走只會加長封存區（2026-09-03 為 404 場，每年約 +245）。
+
+**這張豁免不是有到期日的欠條，是有一項工作的欠條。** 唯一能讓開發區變長的路是**往 2019 之前回補歷史**：
+
+| k 折 | 需要開發區場次 | 還缺 | 約幾年歷史 |
+|---:|---:|---:|---:|
+| **2** | **1,650** | **192** | **0.8 年（回補 2018）** |
+| 3 | 2,339 | 881 | 3.6 年 |
+| 4 | 3,028 | 1,570 | 6.5 年 |
+
+門檻取 k=2 的 1,650，因為那是 walk-forward 最小有意義的形式。**來源能不能回補到 2019 之前尚未量測**，那是解除這張豁免的第一步。
 
 ### 9.2 時間觀察門檻
 
