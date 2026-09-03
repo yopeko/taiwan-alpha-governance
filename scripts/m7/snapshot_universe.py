@@ -36,7 +36,7 @@ from pathlib import Path
 from typing import Any
 
 SCHEMA_ID = "tw-alpha-universe-snapshot/1.0.0"
-CONTRACT_VERSION = "discretionary-research-v1.0.0"
+CONTRACT_VERSION = "discretionary-research-v1.2.0"
 
 EVIDENCE_STATES = ("warehouse-tradability", "published-close-only")
 

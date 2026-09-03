@@ -34,7 +34,7 @@ from typing import Any
 
 REPO = Path(__file__).resolve().parents[2]
 
-CONTRACT_VERSION = "discretionary-research-v1.1.0"
+CONTRACT_VERSION = "discretionary-research-v1.2.0"
 JOURNAL_NAME = "decision_journal.jsonl"
 STAGES = ("thesis", "outcome")
 
@@ -182,7 +182,7 @@ def load_controls(path: Path, entry: str, exit_session: str) -> dict[str, Any]:
 
     mine = (report.get("picks") or {}).get("return_pct")
     baskets = report.get("random_baskets") or {}
-    universe = (report.get("equal_weight_universe") or {}).get("return_pct")
+    universe = (report.get("equal_weight_universe_gross") or {}).get("return_pct")
     percentile = baskets.get("percentile_of_picks")
     median = baskets.get("median_pct")
 
@@ -192,7 +192,7 @@ def load_controls(path: Path, entry: str, exit_session: str) -> dict[str, Any]:
             ("picks return", mine),
             ("random basket median", median),
             ("random basket percentile", percentile),
-            ("equal-weight universe return", universe),
+            ("equal-weight universe gross return", universe),
         )
         if value is None
     ]
@@ -212,7 +212,10 @@ def load_controls(path: Path, entry: str, exit_session: str) -> dict[str, Any]:
         "picks_return_pct": mine,
         "random_basket_median_pct": median,
         "percentile_of_picks": percentile,
-        "equal_weight_universe_pct": universe,
+        # The word travels into the journal on purpose. Two of these three
+        # are net and this one is not, and a reader of the ledger a year from
+        # now has only the field name to tell them.
+        "equal_weight_universe_gross_pct": universe,
         "considered_not_bought_pct": (
             None if not not_bought else not_bought.get("return_pct")
         ),

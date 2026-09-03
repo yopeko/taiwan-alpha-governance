@@ -99,8 +99,30 @@ def basket_return(
     last_close: dict,
     exit_session: str,
     nav: Decimal,
+    apply_costs: bool = True,
 ) -> dict[str, Any]:
-    """Equal-weight, buy at the entry close, sell at the exit close, net of costs."""
+    """Equal-weight, buy at the entry close, sell at the exit close.
+
+    `apply_costs` false gives the gross return of an equal-weight, fractional,
+    frictionless hold -- which is the arithmetic mean of the individual
+    returns. It exists for one caller, and section 3.3 of the contract records
+    why: the whole eligible universe is not a portfolio anyone can execute.
+
+    Measured 2026-09-03 over 2025-09-02 to 2026-09-02, 1,799 eligible names at
+    the reference NAV of 149,717: each position is **74.90 TWD**. 518 names
+    (28.8%) cannot buy a single share and were being held as cash at a flat 0%
+    return; the other 1,281 are under one board lot, where the 20 TWD minimum
+    commission is 26.7% of the position on each side.
+
+    The result was -24.63% against a true equal-weight mean of +25.47%. Fifty
+    points, and in the direction that flatters the picks -- which is precisely
+    what section 3.4 lists three numbers side by side to prevent.
+
+    So the two implementable comparisons (the picks and the random baskets of
+    the same size) stay net, and this one is gross and says so in its name.
+    A partial cost model would be an invented counterfactual; a gross return
+    is a claim anyone can check.
+    """
 
     if not names:
         return {"return_pct": None, "priced": 0, "delisted_in_window": 0}
@@ -122,6 +144,14 @@ def basket_return(
         if end_session != exit_session:
             delisted += 1
         priced += 1
+
+        if not apply_costs:
+            # Fractional and frictionless. No rounding, so no name silently
+            # becomes cash, and no minimum fee applies to a position that
+            # would be too small to carry one.
+            total_start += per_position
+            total_end += per_position * Decimal(str(end)) / Decimal(str(start))
+            continue
 
         quantity = int(per_position / Decimal(str(start)))
         if quantity <= 0:
@@ -145,6 +175,7 @@ def basket_return(
         return {"return_pct": None, "priced": priced, "delisted_in_window": delisted}
     return {
         "return_pct": float((total_end / total_start - 1) * 100),
+        "basis": "net-of-costs" if apply_costs else "gross",
         "priced": priced,
         "delisted_in_window": delisted,
     }
@@ -181,9 +212,14 @@ def main(argv: list[str] | None = None) -> int:
     if missing:
         raise SystemExit(f"no entry close for {missing} on {args.entry_session}")
 
-    def run(names):
+    def run(names, apply_costs=True):
         return basket_return(
-            list(names), entry_close, last_close, args.exit_session, args.nav
+            list(names),
+            entry_close,
+            last_close,
+            args.exit_session,
+            args.nav,
+            apply_costs=apply_costs,
         )
 
     picks_result = run(picks)
@@ -203,7 +239,7 @@ def main(argv: list[str] | None = None) -> int:
     beaten = sum(1 for r in basket_returns if mine is not None and mine > r)
 
     report = {
-        "contract_version": "discretionary-research-v1.0.0",
+        "contract_version": "discretionary-research-v1.2.0",
         "entry_session": args.entry_session,
         "exit_session": args.exit_session,
         "basket_size": len(picks),
@@ -220,10 +256,23 @@ def main(argv: list[str] | None = None) -> int:
                 None if not basket_returns else beaten / len(basket_returns) * 100
             ),
         },
-        "equal_weight_universe": run(eligible),
+        # Gross, and named so. Contract section 3.3: this one is a market
+        # reference, not a portfolio anyone could hold. Two of the three
+        # numbers are net and this one is not, which the reading note says.
+        "equal_weight_universe_gross": run(eligible, apply_costs=False),
         # Contract section 5. The names looked at and not bought are the control
         # for the act of selecting: if they did better, the selection subtracted.
         "considered_not_bought": run(not_bought) if not_bought else None,
+        "reading_note": (
+            "picks, random_baskets and considered_not_bought are net of costs "
+            "and hold the same number of names, so they compare directly. "
+            "equal_weight_universe_gross is gross: the whole eligible universe "
+            "is not executable at this NAV, and charging it a cost model built "
+            "for a real position measures the fee schedule rather than the "
+            "market. Prices are the official unadjusted closes, so every number "
+            "here is reduced by whatever went ex-dividend in the window -- "
+            "equally, so the comparisons hold."
+        ),
     }
     print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
     return 0

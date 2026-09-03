@@ -43,7 +43,7 @@ def thesis_args(**over):
 # section 3.4 made these three numbers required at the outcome stage in
 # v1.1.0, so every outcome in these tests has to carry one.
 CONTROLS_REPORT = {
-    "contract_version": "discretionary-research-v1.1.0",
+    "contract_version": "discretionary-research-v1.2.0",
     "entry_session": "2026-09-02",
     "exit_session": "2027-09-02",
     "basket_size": 1,
@@ -54,7 +54,7 @@ CONTROLS_REPORT = {
         "percentile_of_picks": 75.0,
         "returns_pct": [28.0],
     },
-    "equal_weight_universe": {"return_pct": 26.0},
+    "equal_weight_universe_gross": {"return_pct": 26.0, "basis": "gross"},
     "considered_not_bought": None,
 }
 
@@ -409,7 +409,7 @@ class TestAnOutcomeCarriesTheThreeNumbers:
         controls = row["controls"]
         assert controls["picks_return_pct"] == 30.0
         assert controls["random_basket_median_pct"] == 28.0
-        assert controls["equal_weight_universe_pct"] == 26.0
+        assert controls["equal_weight_universe_gross_pct"] == 26.0
         assert controls["percentile_of_picks"] == 75.0
 
     def test_the_report_is_named_by_its_hash_not_retyped(self):
@@ -423,7 +423,7 @@ class TestAnOutcomeCarriesTheThreeNumbers:
         "drop, missing",
         [
             ("picks", "picks return"),
-            ("equal_weight_universe", "equal-weight universe return"),
+            ("equal_weight_universe_gross", "equal-weight universe gross return"),
         ],
     )
     def test_a_missing_number_is_refused(self, tmp_path, drop, missing):
@@ -556,3 +556,84 @@ class TestTheCriteriaAreComputedNotRemembered:
 
     def test_the_threshold_is_the_one_the_contract_fixed(self):
         assert review.VERDICT_AFTER == 20
+
+
+class TestTheUniverseBenchmarkIsGrossAndSaysSo:
+    """Contract section 3.3, rewritten in v1.2.0.
+
+    v1.0.0 required "the same cost model" on the whole eligible universe. At
+    the reference NAV of 149,717 spread over 1,799 names that is 74.90 TWD a
+    position: 28.8% could not buy one share and were held as cash at a flat
+    0%, and the rest sat under one board lot where the 20 TWD minimum is 26.7%
+    of the position each way. The benchmark came out at -24.63% against a true
+    equal-weight mean of +25.47%.
+
+    Fifty points, in the direction that flatters the picks -- which is exactly
+    what section 3.4 lists three numbers to prevent.
+    """
+
+    ENTRY = {("TWSE", "A"): 100.0, ("TWSE", "B"): 50.0, ("TWSE", "C"): 200.0}
+    LAST = {
+        ("TWSE", "A"): ("2026-09-02", 120.0),
+        ("TWSE", "B"): ("2026-09-02", 45.0),
+        ("TWSE", "C"): ("2026-09-02", 260.0),
+    }
+
+    def gross(self, nav):
+        return controls.basket_return(
+            list(self.ENTRY),
+            self.ENTRY,
+            self.LAST,
+            "2026-09-02",
+            Decimal(str(nav)),
+            apply_costs=False,
+        )
+
+    def test_gross_equals_the_mean_of_the_individual_returns(self):
+        """Equal weight, held, no costs: the portfolio return is the mean of
+        the parts. That identity is what makes this number checkable by hand."""
+
+        expected = (0.20 + -0.10 + 0.30) / 3 * 100
+        assert self.gross(1_000_000)["return_pct"] == pytest.approx(expected)
+
+    def test_gross_does_not_move_with_the_nav(self):
+        """The defect in one line. A benchmark that changes when you change the
+        account size is measuring the fee schedule, not the market."""
+
+        small = self.gross(1_000)["return_pct"]
+        large = self.gross(100_000_000)["return_pct"]
+        assert small == pytest.approx(large)
+
+    def test_the_net_version_does_move_with_the_nav(self):
+        """The contrast, so the previous test cannot pass by accident."""
+
+        def net(nav):
+            return controls.basket_return(
+                list(self.ENTRY), self.ENTRY, self.LAST, "2026-09-02",
+                Decimal(str(nav)),
+            )["return_pct"]
+
+        assert net(30_000) != pytest.approx(net(100_000_000))
+
+    def test_no_name_silently_becomes_cash_when_gross(self):
+        """At 1,000 TWD over three names not one share of C is affordable. Net,
+        it was held as cash at 0% and diluted the benchmark; gross, it carries
+        its real return."""
+
+        assert self.gross(1_000)["return_pct"] == pytest.approx(
+            (0.20 + -0.10 + 0.30) / 3 * 100
+        )
+
+    def test_each_result_declares_which_basis_it_used(self):
+        assert self.gross(1_000_000)["basis"] == "gross"
+        assert controls.basket_return(
+            list(self.ENTRY), self.ENTRY, self.LAST, "2026-09-02",
+            Decimal("1000000"),
+        )["basis"] == "net-of-costs"
+
+    def test_the_contract_says_two_are_net_and_one_is_not(self):
+        contract = (
+            REPO / "docs" / "contracts" / "discretionary-research-contract.md"
+        ).read_text(encoding="utf-8")
+        assert "兩淨一毛" in contract
+        assert "equal_weight_universe_gross" in contract

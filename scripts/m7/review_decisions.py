@@ -44,7 +44,7 @@ import statistics as st
 from pathlib import Path
 from typing import Any
 
-CONTRACT_VERSION = "discretionary-research-v1.1.0"
+CONTRACT_VERSION = "discretionary-research-v1.2.0"
 JOURNAL_NAME = "decision_journal.jsonl"
 
 # Contract section 7. Twenty completed decisions before a verdict, and the
