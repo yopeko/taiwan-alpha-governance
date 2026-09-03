@@ -24,13 +24,13 @@ from pathlib import Path
 
 SCRATCH = Path(r"C:\tmp")
 
-GENERATION = "2026-08-25 six-year rebuild"
-WINDOW = ("2019-01-01", "2026-08-03")
+GENERATION = "2026-09-03 window extended to 2026-09-02"
+WINDOW = ("2019-01-01", "2026-09-02")
 
-STAGING = SCRATCH / "tw-alpha-m3-staging-13"
-CALENDAR = SCRATCH / "tw-alpha-m3-pit-12"
-PRICES = SCRATCH / "tw-alpha-m3-pit-prices-12"
-STATUS = SCRATCH / "tw-alpha-m3-pit-status-11"
+STAGING = SCRATCH / "tw-alpha-m3-staging-14"
+CALENDAR = SCRATCH / "tw-alpha-m3-pit-13"
+PRICES = SCRATCH / "tw-alpha-m3-pit-prices-13"
+STATUS = SCRATCH / "tw-alpha-m3-pit-status-12"
 
 WAREHOUSE_ROOTS = {
     "calendar and lifecycle": CALENDAR,
