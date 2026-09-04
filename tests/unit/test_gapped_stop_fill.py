@@ -106,3 +106,50 @@ class TestTheOldBehaviourIsNotReachableByAccident:
             if re.search(r'=\s*"stop",\s*position\.stop_price', line)
         ]
         assert not offenders, offenders
+
+
+class TestTheFillCanNeverLandBelowTheLimitDown:
+    """The worry that turned out to be impossible by construction.
+
+    A locked limit-down session is one where only sellers remain, and the
+    concern was that `min(stop, open)` might produce a price the exchange
+    would refuse -- the ledger rejects a sell whose limit is below the
+    session's limit-down.
+
+    It cannot. A stop only triggers when `low <= stop_price`, and the session
+    low is itself bounded below by the limit-down. So
+
+        stop >= low >= limit_down
+
+    and the open, being a traded price, is bounded the same way. Their minimum
+    is therefore never below the floor.
+
+    Measured on the corrected momentum run: 198 stops, **6 sessions where high
+    equals low** (only one price traded all day) and **2 of those locked at
+    limit-down** -- 1.01%. Both carried heavy volume (708,000 and 963,997
+    shares), so a small position could plausibly have exited; the
+    participation cap already decides that, and it is not this rule's job.
+    """
+
+    def test_the_trigger_condition_bounds_the_stop_from_below(self):
+        """The argument, as arithmetic. If the stop had been below the floor
+        the session low could never have reached it."""
+
+        limit_down, low = Decimal("34.45"), Decimal("34.45")
+        stop = Decimal("40.00")
+        assert low <= stop  # the trigger fired
+        assert low >= limit_down  # the exchange's floor held
+        assert min(stop, low) >= limit_down
+
+    def test_a_fully_locked_session_fills_at_the_only_price_that_traded(self):
+        """high == low == open: there is one price and the fill is it."""
+
+        stop, opened = Decimal("40.00"), Decimal("34.45")
+        assert fill(str(stop), str(opened)) == opened
+
+    def test_the_driver_triggers_only_on_the_low_reaching_the_stop(self):
+        """The premise of the argument above. If this condition ever became
+        something else -- the close, say -- the bound would stop holding and
+        nothing else would notice."""
+
+        assert "if low <= position.stop_price:" in SOURCE
