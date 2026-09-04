@@ -230,6 +230,26 @@ def build_prices(
                     "close": first_present(source_row, "close", "close_price"),
                     "volume": first_present(source_row, "volume", "trade_volume"),
                     "turnover": first_present(source_row, "turnover", "trade_value"),
+                    # PIT contract section 6.4 requires this table to preserve
+                    # "volume／turnover／transactions". It preserved two of the
+                    # three: the parsers have carried `transactions` for both
+                    # markets since the first capture -- it is in every
+                    # `source_columns_seen` list this builder has ever written
+                    # -- and the row construction simply never picked it up.
+                    #
+                    # Found 2026-09-04 while checking whether FinMind could
+                    # supply intraday data. Its free daily feed returns
+                    # `Trading_turnover`, the per-security transaction count,
+                    # and the question "why does a vendor have a field the
+                    # warehouse lacks" turned out to have the answer "it does
+                    # not lack it, it dropped it".
+                    #
+                    # Two days earlier the regime-continuity measurement needed
+                    # this field, found it absent from the table, and went to
+                    # the raw blobs for a market-wide total instead. Per
+                    # security was not available and the measurement was
+                    # narrowed to fit.
+                    "transactions": first_present(source_row, "transactions"),
                     "ohlc_state": state,
                     "activity_scope": "regular-session",
                     "price_basis": "raw-official-unadjusted",

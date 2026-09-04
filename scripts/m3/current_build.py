@@ -24,12 +24,12 @@ from pathlib import Path
 
 SCRATCH = Path(r"C:\tmp")
 
-GENERATION = "2026-09-03 window extended to 2026-09-02"
+GENERATION = "2026-09-04 transactions restored to daily_prices_pit"
 WINDOW = ("2019-01-01", "2026-09-02")
 
 STAGING = SCRATCH / "tw-alpha-m3-staging-14"
 CALENDAR = SCRATCH / "tw-alpha-m3-pit-13"
-PRICES = SCRATCH / "tw-alpha-m3-pit-prices-13"
+PRICES = SCRATCH / "tw-alpha-m3-pit-prices-14"
 STATUS = SCRATCH / "tw-alpha-m3-pit-status-12"
 
 WAREHOUSE_ROOTS = {
@@ -48,6 +48,11 @@ WAREHOUSE_ROOTS = {
 # created to stop, one generation later.
 RESEARCH_DATASET = SCRATCH / "tw-alpha-m6-dataset-10"
 RESEARCH_DATASET_GENERATION = "2026-09-03 window extended, 1,862 sessions"
+# Still 13, and deliberately. dataset-10 was built from it, so the pair has
+# to move together or a test comparing them reads a generation gap as a
+# defect. pit-prices-14 adds `transactions` and changes nothing else -- the
+# other 22 columns are identical row by row -- so the frozen dataset loses
+# nothing by staying where it is until something needs the new column.
 RESEARCH_DATASET_PRICES = SCRATCH / "tw-alpha-m3-pit-prices-13"
 
 # The sealed split derived from RESEARCH_DATASET. Named here for the reason
