@@ -128,7 +128,8 @@
 - [排名品質量測 001：動能的排序能力與零無法區分](evidence/rank-quality-001-2026-08-28.md)
 - [M0 §9.1 缺了三欄，而指數那一欄改變了控制 001 的結論](evidence/m7-benchmarks-and-cost-stress-2026-09-03.md)
 - [第 0 步：分鐘資料能改變多少？用日線夾出來，不必先買](evidence/m7-stop-fill-bound-2026-09-04.md)
-- [回測器讀 23 欄用 12 欄：記憶體減半、速度快四成、輸出逐欄相同](evidence/m6-dataset-column-projection-2026-09-04.md)
+- [回測器的日線層：記憶體 7.56 → 1.35 GB，耗時 422 → 165 秒](evidence/m6-dataset-column-projection-2026-09-04.md)
+- [FinMind 能不能當分鐘資料來源：問了端點，不是問文件](evidence/audit-finmind-intraday-probe-2026-09-04.md)
 
 ## M9 Shadow 觀察
 

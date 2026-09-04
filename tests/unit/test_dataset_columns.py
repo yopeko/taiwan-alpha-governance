@@ -200,3 +200,46 @@ def test_the_projection_is_a_real_saving():
 
     assert len(backtest.DATASET_COLUMNS) <= 16
     assert "columns=list(DATASET_COLUMNS)" in SOURCE
+
+
+class TestTheFinMindIntradayProbeAsksOnlyWhatIsUnsettled:
+    """The 2026-08-21 cross-validation settled the tier, the rate limit, the
+    universe coverage and the price agreement. A probe that re-asked those
+    would spend the free tier's hourly budget on answers already on record.
+    """
+
+    PROBE = (REPO / "scripts" / "audit" / "probe_finmind_intraday.py").read_text(
+        encoding="utf-8"
+    )
+
+    def test_it_probes_a_liquid_control_alongside_the_delisted_case(self):
+        """Without the control, a refusal on the delisted security cannot be
+        told from a refusal about the tier."""
+
+        assert 'LIQUID_CONTROL = "2330"' in self.PROBE
+        assert 'DELISTED_CASE = "3202"' in self.PROBE
+
+    def test_it_keeps_a_daily_request_as_the_liveness_control(self):
+        """A refusal on the minute dataset means nothing if the network or the
+        account is down. The daily call is what separates them."""
+
+        assert 'f"daily/{DELISTED_CASE}/window"' in self.PROBE
+
+    def test_a_refusal_is_recorded_rather_than_raised(self):
+        """The tier refusal **is** the answer to question one. Raising on it
+        would throw the finding away."""
+
+        assert "Every outcome is data. Nothing here raises on a refusal." in self.PROBE
+
+    def test_the_interval_respects_the_measured_free_tier_limit(self):
+        """300 requests an hour is one every twelve seconds."""
+
+        assert "INTERVAL_SECONDS = 12.0" in self.PROBE
+
+    def test_output_may_not_land_in_the_repository(self):
+        """The same guard the history probe needed after it wrote into the
+        repository while its own check said nothing -- resolved first, because
+        a relative path is not `is_relative_to` an absolute one."""
+
+        assert "out = args.out.resolve()" in self.PROBE
+        assert "is inside the repository" in self.PROBE
