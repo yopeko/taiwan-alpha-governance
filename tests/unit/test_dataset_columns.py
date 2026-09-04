@@ -29,8 +29,29 @@ SOURCE = (REPO / "scripts" / "m6" / "run_ledger_backtest.py").read_text(
 # rest are its own output structures and are deliberately not here.
 ROW_VARIABLES = ("row", "bar", "today", "b", "prior", "previous")
 
+# Any subscript by a dataset column name, whatever the expression in front of
+# it. This exists because the variable-name list above was not enough: the
+# driver had `rows[(s.market, s.symbol)]["tradability_state"]` in two places,
+# which is a dataset row read through an expression rather than a bound name.
+# Both a manual grep and the first version of this test missed them, and the
+# run failed at the site instead -- loudly, but only after four minutes.
+#
+# Any subscript-by-column-name is either a dict where a `Bar` belongs, or an
+# output structure that happens to share a column name with the dataset. The
+# second is rare enough to name explicitly.
+ANY_SUBSCRIPT = re.compile(r"""\[\s*["']([a-z_]+)["']\s*\]""")
+
+# Output fields whose names collide with dataset columns. None today; kept so
+# a future collision is declared here rather than silently widening the scan.
+OUTPUT_FIELDS_SHARING_A_COLUMN_NAME: frozenset[str] = frozenset()
+
+# Attribute access since 2026-09-04, when the row dicts became `Bar` objects
+# with `__slots__`. The subscript and `.get()` forms stay in the pattern on
+# purpose: a revert, or a new site written in the old style, must still be
+# caught rather than quietly ignored.
 ACCESS = re.compile(
-    r"\b(?:" + "|".join(ROW_VARIABLES) + r")\s*(?:\[\s*|\.get\(\s*)[\"']([a-z_]+)[\"']"
+    r"\b(?:" + "|".join(ROW_VARIABLES) + r")\s*"
+    r"""(?:\[\s*["']([a-z_]+)["']|\.get\(\s*["']([a-z_]+)["']|\.([a-z_]+)\b)"""
 )
 
 
@@ -55,7 +76,8 @@ def columns_read() -> set[str]:
     rather than from a list someone would have to keep in step.
     """
 
-    return set(ACCESS.findall(SOURCE)) & dataset_schema()
+    found = {name for match in ACCESS.findall(SOURCE) for name in match if name}
+    return found & dataset_schema()
 
 
 def test_every_column_the_driver_reads_is_projected():
@@ -95,6 +117,78 @@ def test_the_schema_scan_found_the_real_schema():
     schema = dataset_schema()
     assert len(schema) >= 20, schema
     assert {"tradability_state", "limit_up", "previous_close"} <= schema
+
+
+def test_no_dataset_column_is_read_by_subscript_anywhere():
+    """The check the variable-name scan could not make.
+
+    `rows[(s.market, s.symbol)]["tradability_state"]` is a dataset row reached
+    through an expression, so no list of bound names would have found it. Two
+    of those survived the conversion and the run raised
+    `TypeError: 'Bar' object is not subscriptable` four minutes in.
+
+    Loud is better than silent, but this is better than loud.
+    """
+
+    offenders = sorted(
+        (set(ANY_SUBSCRIPT.findall(SOURCE)) & dataset_schema())
+        - OUTPUT_FIELDS_SHARING_A_COLUMN_NAME
+    )
+    assert not offenders, (
+        f"read by subscript: {offenders}. Dataset rows are `Bar` objects with "
+        f"`__slots__` -- use attribute access, or add the name to "
+        f"OUTPUT_FIELDS_SHARING_A_COLUMN_NAME if it is an output field that "
+        f"happens to share a column name"
+    )
+
+
+def test_the_rows_are_slotted_objects_not_dicts():
+    """Measured 2026-09-04 over 3,928,820 rows: 3.37 GB as dicts against
+    0.59 GB as `Bar`. A twelve-key dict carries a hash table for attribute
+    names the author already knows."""
+
+    import run_ledger_backtest as backtest
+
+    assert backtest.Bar.__slots__ == backtest.DATASET_COLUMNS
+    assert not hasattr(backtest.Bar(tuple([None] * 12)), "__dict__")
+
+
+def test_a_column_the_projection_forgot_raises_rather_than_reads_as_none():
+    """The failure mode the projection introduced, closed by the slots.
+
+    A dict answers `.get("volume")` with None for a column that was never
+    read, and None is also what the warehouse returns for a value it
+    genuinely lacks. The two are indistinguishable. A slot never filled is not.
+    """
+
+    import pytest
+
+    import run_ledger_backtest as backtest
+
+    bar = backtest.Bar.__new__(backtest.Bar)
+    with pytest.raises(AttributeError):
+        bar.close
+
+
+def test_sharing_a_value_cannot_change_a_comparison():
+    """The loader shares one object per distinct value. The whole change rests
+    on Python comparing by value, so it is asserted rather than argued."""
+
+    import run_ledger_backtest as backtest
+
+    pool: dict = {}
+    shared = [pool.setdefault(v, v) for v in (12.5, 12.5)]
+    assert shared[0] == shared[1] == 12.5 and shared[0] is shared[1]
+    # `is None` still works: None is a singleton and is never pooled.
+    assert backtest.Bar(tuple([None] * 12)).close is None
+
+
+def test_the_loader_shares_values_and_says_why():
+    source = (REPO / "scripts" / "m6" / "run_ledger_backtest.py").read_text(
+        encoding="utf-8"
+    )
+    assert "pool.setdefault(v, v)" in source
+    assert "cannot change behaviour" in source
 
 
 def test_the_projection_is_a_real_saving():
