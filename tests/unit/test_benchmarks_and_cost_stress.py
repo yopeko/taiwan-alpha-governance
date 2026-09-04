@@ -482,3 +482,137 @@ class TestTheStopFillBoundUsesTheStopThatWasSubmitted:
         with pytest.raises(SystemExit) as caught:
             module.main(["--run", path, "--dataset", str(REPO)])
         assert "read as agreement" in str(caught.value)
+
+
+class TestTheReportCarriesTheMinimumComparisonSet:
+    """M0 section 9.1 has required these columns since v1.0.0 and no candidate
+    report carried them until 2026-09-04, because nothing computed them.
+
+    `benchmarks.py` computed them from 2026-09-03; this is the wiring that
+    puts them where a reader compares.
+    """
+
+    CONTRACT = (
+        REPO / "docs" / "contracts" / "candidate-report-contract.md"
+    ).read_text(encoding="utf-8")
+    DRIVER = (REPO / "scripts" / "m6" / "run_ledger_backtest.py").read_text(
+        encoding="utf-8"
+    )
+
+    REQUIRED = (
+        "benchmark_cash_pct",
+        "benchmark_equal_weight_universe_gross_pct",
+        "benchmark_index_taiex_price_gross_pct",
+        "benchmark_index_taiex_total_return_gross_pct",
+        "benchmark_basis",
+    )
+
+    def test_the_contract_requires_them(self):
+        for name in self.REQUIRED:
+            assert name in self.CONTRACT, name
+
+    def test_the_driver_builds_them(self):
+        for name in self.REQUIRED:
+            assert f'"{name}"' in self.DRIVER, name
+
+    def test_the_schema_version_moved(self):
+        """A report that gained required columns is not the same schema."""
+
+        assert 'CANDIDATE_REPORT_SCHEMA = "tw-alpha-m6-candidate-report/1.3.0"' in self.DRIVER
+        assert "candidate-report-v1.3.0" in self.CONTRACT
+
+    def test_every_benchmark_column_says_it_is_gross(self):
+        """The candidate's `return_pct` is net. Putting the two side by side
+        without saying so leaves the reader to assume, and on 2026-09-03 that
+        assumption was worth fifty percentage points in the flattering
+        direction."""
+
+        assert '"benchmark_basis": "gross",' in self.DRIVER
+        for name in self.REQUIRED:
+            if name.startswith("benchmark_index") or "equal_weight" in name:
+                assert "gross" in name, name
+        assert "毛" in self.CONTRACT
+
+    def test_a_missing_index_table_is_reported_not_dropped(self):
+        """M0 requires the column. A benchmark that quietly disappears is the
+        shape section 9.1 exists to stop."""
+
+        import run_ledger_backtest as backtest
+
+        out = backtest.minimum_comparison_set(
+            REPO, REPO / "no-such-index", "2020-01-02", "2020-12-30"
+        )
+        assert out["available"] is False
+        assert "build_index_benchmarks" in out["reason"]
+
+    def test_an_absent_arm_becomes_null_rather_than_zero(self):
+        """Zero is a return. Absence is not, and the two must not share a cell
+        value -- a benchmark that reads 0.00% looks like a market that went
+        nowhere rather than one nobody measured.
+
+        Asserted on the lookup itself: the report builder needs a full run
+        result to construct, and a fake one detailed enough to reach this line
+        would be testing the fake.
+        """
+
+        def arm(arms: dict, name: str):
+            value = (arms.get(name) or {}).get("return_pct")
+            return None if value is None else float(value)
+
+        assert arm({}, "index_TAIEX:price") is None
+        assert arm({"index_TAIEX:price": {}}, "index_TAIEX:price") is None
+        assert arm({"index_TAIEX:price": {"return_pct": None}}, "index_TAIEX:price") is None
+        assert arm({"index_TAIEX:price": {"return_pct": 0}}, "index_TAIEX:price") == 0.0
+
+        # And the driver uses exactly that lookup, not a `or 0.0` default.
+        assert 'value = (arms.get(name) or {}).get("return_pct")' in self.DRIVER
+        assert 'return None if value is None else float(value)' in self.DRIVER
+        assert '"benchmark_cash_pct": 0.0,' in self.DRIVER
+
+
+class TestPassingTheCostStressIsDefined:
+    """M0 section 8 required "通過 2 倍成本壓力" from v1.0.0 and never said
+    what passing meant. The gap did not surface until 2026-09-04, because the
+    stress had never been run -- an unexecuted requirement's ambiguity stays
+    invisible.
+
+    D26 defines it. These tests hold the definition to the two things that
+    make it checkable rather than re-interpretable.
+    """
+
+    def test_m0_now_says_what_passing_means(self):
+        assert "§8.1a" in M0 or "8.1a" in M0
+        assert "通過 2 倍成本壓力 =" in M0
+
+    def test_both_criteria_are_named(self):
+        """One is the like-for-like control, the other is the market. A single
+        criterion would let "對照組" be re-read next time."""
+
+        assert "隨機同池選股分佈的中位數" in M0
+        assert "未還原價格指數" in M0
+
+    def test_the_controls_are_stressed_at_the_same_multiplier(self):
+        """Stressing the candidate and not the controls compares it against an
+        easier world than the one it is in."""
+
+        assert "只壓候選不壓對照" in M0
+
+    def test_the_excluded_benchmarks_say_why_they_are_excluded(self):
+        """Exclusions decided by argument, not by which ones the candidate
+        happens to beat. The total-return index is excluded because the
+        dataset carries unadjusted prices, and TW50 because section 9.1 asks
+        for the eligible universe rather than a large-cap basket."""
+
+        assert "含息，而策略不含" in M0 or "含息而策略不含" in M0
+        assert "權值股" in M0
+
+    def test_they_are_still_reported_even_though_they_do_not_decide(self):
+        """A report listing only the columns the candidate wins is what
+        section 9.1 exists to prevent."""
+
+        assert "仍必須依 §9.1 並排呈報" in M0
+
+    def test_the_multipliers_the_definition_applies_to_exist(self):
+        import run_ledger_backtest as backtest
+
+        assert Decimal("2") in backtest.COST_STRESS_MULTIPLIERS

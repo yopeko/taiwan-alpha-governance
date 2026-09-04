@@ -76,7 +76,10 @@ TPEX_MARKET = "TPEX"
 # 1.2.0 when `rank_consistency_violations` was replaced by the scarcity and
 # sizing pair -- a reader matching an old report against this schema would
 # otherwise be told the columns are the ones it does not have.
-CANDIDATE_REPORT_SCHEMA = "tw-alpha-m6-candidate-report/1.2.0"
+# 1.3.0 adds M0 section 9.1's cash, index and equal-weight columns,
+# required by that section since v1.0.0 and carried by no report until
+# 2026-09-04 because nothing computed them.
+CANDIDATE_REPORT_SCHEMA = "tw-alpha-m6-candidate-report/1.3.0"
 CANDIDATE_REPORT_CONTRACT = "candidate-report-v1.2.0"
 
 # The median stop distance measured across the SEPA trades in M6 Phase 0.
@@ -1254,13 +1257,57 @@ def realised_costs(result: dict[str, Any]) -> tuple[Decimal, Decimal]:
     return cost, turnover
 
 
-def candidate_report(results: dict[str, dict[str, Any]]) -> tuple[list[dict], dict]:
+def minimum_comparison_set(
+    dataset: Path, index_root: Path | None, first: str, last: str
+) -> dict[str, Any]:
+    """M0 section 9.1's cash, index and equal-weight arms over the run's window.
+
+    The contract has required them since v1.0.0 and no candidate report has
+    ever carried them, because nothing computed them. `scripts/m6/benchmarks.py`
+    computes them; this puts them in the report, where a reader compares.
+
+    **Every arm here is gross and the candidate's return is net.** The index is
+    published rather than traded, and the equal-weight universe is about two
+    thousand names -- at the M0 scale a position too small to buy one share of.
+    Charging it a cost model measured the fee schedule rather than the market,
+    and on 2026-09-03 that was worth fifty percentage points in the direction
+    that flattered the picks. The row says `gross` so the mismatch is read
+    rather than assumed away.
+
+    An absent index table is reported, not skipped: M0 requires the column,
+    and a silently missing benchmark is the shape this whole section exists to
+    stop.
+    """
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import benchmarks
+
+    if index_root is None or not (index_root / "index_benchmarks_pit.parquet").is_file():
+        return {
+            "available": False,
+            "reason": (
+                "no index table; build it with scripts/m3/build_index_benchmarks.py"
+            ),
+        }
+    return benchmarks.build(dataset, index_root, first, last)
+
+
+def candidate_report(
+    results: dict[str, dict[str, Any]],
+    comparison_set: dict[str, Any] | None = None,
+) -> tuple[list[dict], dict]:
     """One row per scale, plus the manifest, per the candidate report contract.
 
     Both scales are required. A report carrying one is not a simpler report,
     it is a report missing a field: ADR-0002 decision 3 asks for the gap
     between them, and a gap needs two numbers.
     """
+
+    arms = ((comparison_set or {}).get("arms") or {})
+
+    def arm(name: str) -> float | None:
+        value = (arms.get(name) or {}).get("return_pct")
+        return None if value is None else float(value)
 
     rows: list[dict[str, Any]] = []
     for scale, result in sorted(results.items()):
@@ -1286,6 +1333,18 @@ def candidate_report(results: dict[str, dict[str, Any]]) -> tuple[list[dict], di
                     float(cost / turnover) if turnover else 0.0
                 ),
                 "refusals_total": total,
+                # M0 section 9.1's minimum comparison set. Gross, and named
+                # so: the candidate's `return_pct` above is net of commission,
+                # tax and slippage, and these are not.
+                "benchmark_cash_pct": 0.0,
+                "benchmark_equal_weight_universe_gross_pct": arm(
+                    "equal_weight_eligible_universe"
+                ),
+                "benchmark_index_taiex_price_gross_pct": arm("index_TAIEX:price"),
+                "benchmark_index_taiex_total_return_gross_pct": arm(
+                    "index_TAIEX:total-return"
+                ),
+                "benchmark_basis": "gross",
                 # Contract v1.1.0 section 3. The verdict is about whether
                 # selection followed a ranking, not about how many candidates
                 # were turned away: a screen over two thousand securities
@@ -1456,6 +1515,16 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--index-root",
+        type=Path,
+        default=None,
+        help=(
+            "the index_benchmarks_pit table, for M0 section 9.1's market "
+            "benchmark column. Omitted, the report says the column is "
+            "unavailable rather than omitting it"
+        ),
+    )
+    parser.add_argument(
         "--cost-multiplier",
         type=Decimal,
         default=Decimal("1"),
@@ -1499,7 +1568,15 @@ def main(argv: list[str] | None = None) -> int:
             name: run(args.dataset, opening_cash=cash, **common)
             for name, cash in scales.items()
         }
-        rows, manifest = candidate_report(results)
+        reference = results["reference-measurement"]
+        comparison_set = minimum_comparison_set(
+            args.dataset,
+            args.index_root,
+            str(reference["first_session"]),
+            str(reference["last_session"]),
+        )
+        rows, manifest = candidate_report(results, comparison_set)
+        manifest["minimum_comparison_set"] = comparison_set
         root = args.report_root
         root.mkdir(parents=True, exist_ok=True)
         pq.write_table(pa.Table.from_pylist(rows), root / "candidate_report.parquet")

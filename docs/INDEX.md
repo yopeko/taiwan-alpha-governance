@@ -11,6 +11,7 @@
 
 ## M0–M1 契約與架構
 
+- [Owner 決定 D26：定義「通過 2 倍成本壓力」，追認候選報告契約 v1.3.0](evidence/m3-owner-decision-d26-2026-09-04.md)
 - [Owner 決定 D25：walk-forward folds 不實作，M0 §9.1 加豁免並預先寫定解除參數](evidence/m3-owner-decision-d25-2026-09-03.md)
 - [Owner 決定 D24：三個契約修訂追認、資料集改指 dataset-10、M9 每日軌道登記](evidence/m3-owner-decision-d24-2026-09-03.md)
 - [Owner 決定 D23：判斷式研究軌道獲准，M0 §2.1 承認第二個候選來源（m0-v1.7.0）](evidence/m3-owner-decision-d23-2026-09-02.md)

@@ -2,8 +2,8 @@
 
 | 欄位 | 值 |
 |---|---|
-| 契約版本 | `candidate-report-v1.2.0`（2026-08-26；§3 判定拆為稀缺與塞不下兩項，只有前者決定判定。v1.1.0 同日把判定由拒絕數改為排序一致性，見 [ADR-0002 決策 4 的修訂](../adr/0002-measurement-scale-separate-from-execution-scale.md)）|
-| 狀態 | `baseline-approved`，2026-08-25 |
+| 契約版本 | `candidate-report-v1.3.0`（2026-09-04；§2.1 新增 M0 §9.1 缺的三個比較欄，見 §2.1.1。v1.2.0 見 2026-08-26：§3 判定拆為稀缺與塞不下兩項，只有前者決定判定；v1.1.0 同日把判定由拒絕數改為排序一致性，見 [ADR-0002 決策 4 的修訂](../adr/0002-measurement-scale-separate-from-execution-scale.md)）|
+| 狀態 | **`baseline-approved` v1.3.0，2026-09-04**（[D26](../evidence/m3-owner-decision-d26-2026-09-04.md)）。v1.2.0 於 2026-08-25 核准 |
 | 用途 | 強制 ADR-0002 決策 3 與 4；作為 M7 巢狀驗證的輸入格式 |
 | 核准 | Product Owner（單一簽核人，Owner 決定 2026-08-25）|
 
@@ -41,8 +41,27 @@ ADR-0002 的決策 3 與 4 目前只是文字：報告要並列兩個規模、�
 | `cost_share_of_capital` | 成本 ÷ 期初資金 |
 | `cost_share_of_turnover` | 成本 ÷ 成交額 |
 | `completed_trades` | 完成交易數 |
+| `benchmark_cash_pct` | **M0 §9.1**：現金。名目 0%，見下 |
+| `benchmark_equal_weight_universe_gross_pct` | **M0 §9.1**：合資格股票池等權，**毛** |
+| `benchmark_index_taiex_price_gross_pct` | **M0 §9.1**：發行量加權股價指數，**毛** |
+| `benchmark_index_taiex_total_return_gross_pct` | 同上的報酬指數，**毛** |
+| `benchmark_basis` | 恆為 `gross`，見 §2.1.1 |
 
 **兩個規模都必須在場。** 只有一列的報告是缺欄位，不是簡化版——ADR 決策 3 要的是兩者的差距，而差距需要兩個數。
+
+#### 2.1.1 最低比較組（v1.3.0，2026-09-04）
+
+[M0 §9.1](../m0-project-contract.md) 從第一版起就要求每個 challenger 對照「現金、適當市場指數或 ETF benchmark、合資格股票池等權、equal-size same-pool random selection、簡單動能／相對強度、目前 champion 及 challenger」。
+
+**其中三欄從來沒有被任何一份報告帶過，因為沒有東西算得出來。** 隨機選股由對照 001 補上，動能與 challenger 是執行本身，champion 目前不存在（沒有東西是 `validated`）——**缺的是現金、指數、等權池**，而它們現在在這裡。
+
+**三欄皆為毛報酬，而候選的 `return_pct` 是淨額。**
+
+指數是公布的不是交易的；等權池是約兩千檔，在 M0 規模下每檔的部位小到買不到一股。**對一個沒有人能執行的組合套用為真實部位設計的成本模型，量到的是手續費表不是市場**——[2026-09-03 實測那樣做值 50 個百分點，而且是朝美化選股的方向](../evidence/m7-benchmarks-and-cost-stress-2026-09-03.md)。
+
+所以 `benchmark_basis` 恆為 `gross` 且必填：**一份把淨額與毛額並排而不說的報告，是在讓讀者自己去假設。**
+
+**指數表缺席時，該欄為 null 且 manifest 記錄原因，而不是把欄位拿掉。** M0 要求這一欄，而一個靜默消失的基準正是本節存在的理由。
 
 ### 2.2 拒絕理由全表
 
