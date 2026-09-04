@@ -129,11 +129,20 @@ def number(text: str) -> Decimal | None:
         return None
 
 
-def observations(archive: Path) -> list[tuple[Path, dict[str, Any]]]:
+def observations(
+    archive: Path, sources: tuple[str, ...] = (SOURCE_ID,)
+) -> list[tuple[Path, dict[str, Any]]]:
+    """Every observation in an archive belonging to the given sources.
+
+    `sources` defaults to this module's own, so existing callers are
+    unchanged; the institutional lane passes its two.
+    """
+
+    wanted = set(sources)
     found = []
     for path in sorted((archive / "raw_observations").rglob("*.json")):
         record = json.loads(path.read_text(encoding="utf-8"))
-        if record.get("source_id") == SOURCE_ID:
+        if record.get("source_id") in wanted:
             found.append((path, record))
     return found
 

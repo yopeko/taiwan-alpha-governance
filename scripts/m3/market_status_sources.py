@@ -84,6 +84,67 @@ TWSE_OPERATING_RULES_CODE = "FL007304"
 TWSE_MATERIAL_DAILY_URL = "https://openapi.twse.com.tw/v1/opendata/t187ap04_L"
 TPEX_MATERIAL_DAILY_URL = "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap04_O"
 
+# 三大法人買賣超，加入 2026-09-04。與本檔其餘來源不同的兩點:
+#
+# 一、它們**不接受日期區間**——一次請求一個場次。六年是 3,724 次請求。
+#     其餘來源一次請求就能拿一整段，所以 `request_parameters` 的區間形式
+#     對它們不適用，見 `institutional_parameters`。
+#
+# 二、TWSE 的回應版面在窗口內變過兩次（12 → 16 → 19 欄，實測於
+#     [可行性探測](../../docs/evidence/m3-institutional-reach-probe-2026-09-04.md)），
+#     而 TPEx 是 23 欄。**兩個市場的欄位集合不同，不可強行對齊**——與 PIT
+#     契約 §6.4.1 記載的成交量口徑差異是同一類問題。
+TWSE_INSTITUTIONAL_URL = "https://www.twse.com.tw/rwd/zh/fund/T86"
+# TPEx 的 openapi 端點回傳 HTML 而非 JSON（探測 §3），所以走 rwd 這條。
+TPEX_INSTITUTIONAL_URL = "https://www.tpex.org.tw/www/zh-tw/insti/dailyTrade"
+
+M3_INSTITUTIONAL_SOURCES = (
+    RawSourceDefinition(
+        source_id="TWSE-INSTITUTIONAL-DAILY",
+        publisher="TWSE",
+        endpoint_id="institutional-net-buy-daily",
+        url_prefixes=(TWSE_INSTITUTIONAL_URL,),
+        required_parameters=(("response", "json"),),
+    ),
+    RawSourceDefinition(
+        source_id="TPEX-INSTITUTIONAL-DAILY",
+        publisher="TPEX",
+        endpoint_id="institutional-net-buy-daily",
+        url_prefixes=(TPEX_INSTITUTIONAL_URL,),
+        required_parameters=(("response", "json"),),
+    ),
+)
+
+INSTITUTIONAL_SPECS: dict[str, dict[str, object]] = {
+    "TWSE-INSTITUTIONAL-DAILY": {
+        "url": TWSE_INSTITUTIONAL_URL,
+        "calendar": "gregorian",
+        "date_parameter": "date",
+        "extra": {"selectType": "ALL"},
+    },
+    "TPEX-INSTITUTIONAL-DAILY": {
+        "url": TPEX_INSTITUTIONAL_URL,
+        "calendar": "roc-slash",
+        "date_parameter": "date",
+        "extra": {"type": "Daily", "sect": "EW", "id": ""},
+    },
+}
+
+
+def institutional_parameters(source_id: str, session: date) -> dict[str, str]:
+    """One session, not a range. These endpoints take no start/end."""
+
+    spec = INSTITUTIONAL_SPECS[source_id]
+    parameters = {
+        "response": "json",
+        str(spec["date_parameter"]): format_date(session, str(spec["calendar"])),
+    }
+    extra = spec.get("extra")
+    if isinstance(extra, dict):
+        parameters.update({str(k): str(v) for k, v in extra.items()})
+    return parameters
+
+
 M3_MARKET_STATUS_SOURCES = (
     RawSourceDefinition(
         source_id="TWSE-STATUS-PUNISH-HIST",
@@ -224,11 +285,15 @@ SOURCE_SPECS: dict[str, dict[str, object]] = {
 def build_m3_registry() -> RawSourceRegistry:
     """P0 formal allowlist plus the M3 historical market-status endpoints."""
 
-    return RawSourceRegistry(tuple(P0_FORMAL_SOURCES) + M3_MARKET_STATUS_SOURCES)
+    return RawSourceRegistry(
+        tuple(P0_FORMAL_SOURCES)
+        + M3_MARKET_STATUS_SOURCES
+        + M3_INSTITUTIONAL_SOURCES
+    )
 
 
 def format_date(value: date, calendar: str) -> str:
-    if calendar == "roc":
+    if calendar in ("roc", "roc-slash"):
         return f"{value.year - 1911}/{value.month:02d}/{value.day:02d}"
     if calendar == "gregorian-slash":
         return value.strftime("%Y/%m/%d")
