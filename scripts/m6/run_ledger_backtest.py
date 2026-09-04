@@ -872,6 +872,7 @@ def run(
             close = Decimal(str(row.close))
             low = Decimal(str(row.low)) if row.low is not None else close
             high = Decimal(str(row.high)) if row.high is not None else close
+            opened = Decimal(str(row.open)) if row.open is not None else close
             age = index - sessions.index(position.entry_session)
 
             # Candidate plan 006 section 2.1. The ratchet uses `peak_high`,
@@ -892,7 +893,25 @@ def run(
                 # Conservative: when a session touches both the stop and a
                 # profitable level, the stop is assumed to come first. Daily
                 # bars cannot say which did, and this errs against the account.
-                reason, price = "stop", position.stop_price
+                #
+                # **A gapped session cannot fill at the stop, because the stop
+                # price never traded.** A stop order is a trigger, not a limit:
+                # once the price reaches it the order becomes a market order,
+                # and if the session opened below the stop the trigger fired
+                # before anyone could act. The first price available is the
+                # open.
+                #
+                # Measured 2026-09-04 before this was written
+                # (`bound_stop_fill_with_bars.py`): filling every stop at the
+                # stop price made the momentum candidate's reported proceeds
+                # **6.23% of opening NAV** better than the best any real fill
+                # could have achieved, because 21.0% of its stops gapped. The
+                # random controls gapped just as often -- 18.6% to 23.4% --
+                # and cost 0.01% to 1.18%, so the error is not a property of
+                # stopping out. It is a property of holding names that gap
+                # hard, and momentum holds recent winners.
+                reason = "stop"
+                price = min(position.stop_price, opened)
             elif entry_rule == "rank-only":
                 # Held until it leaves the top N on a rebalance, not until it
                 # gets old. A holding period is a parameter; membership of the

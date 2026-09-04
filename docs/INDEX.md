@@ -128,6 +128,7 @@
 - [排名品質量測 001：動能的排序能力與零無法區分](evidence/rank-quality-001-2026-08-28.md)
 - [M0 §9.1 缺了三欄，而指數那一欄改變了控制 001 的結論](evidence/m7-benchmarks-and-cost-stress-2026-09-03.md)
 - [第 0 步：分鐘資料能改變多少？用日線夾出來，不必先買](evidence/m7-stop-fill-bound-2026-09-04.md)
+- [停損不可能成交在當天沒有成交過的價格：修正後差 14.23 個百分點](evidence/m6-gapped-stop-fill-2026-09-04.md)
 - [回測器的日線層：記憶體 7.56 → 1.35 GB，耗時 422 → 165 秒](evidence/m6-dataset-column-projection-2026-09-04.md)
 - [FinMind 能不能當分鐘資料來源：問了端點，不是問文件](evidence/audit-finmind-intraday-probe-2026-09-04.md)
 - [契約要三個度量，倉庫存了兩個](evidence/m3-transactions-restored-2026-09-04.md)
