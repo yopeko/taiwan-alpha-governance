@@ -79,6 +79,9 @@ TPEX_MARKET = "TPEX"
 # 1.3.0 adds M0 section 9.1's cash, index and equal-weight columns,
 # required by that section since v1.0.0 and carried by no report until
 # 2026-09-04 because nothing computed them.
+# 1.5.0 adds the three delisting-disposal columns. A report that mixes a
+# fabricated fill in with real ones lets a reader take the model for market
+# evidence, and one disposal moved a result by eight points.
 # 1.4.0 names which drawdown `drawdown_pct` is -- the maximum over the equity
 # curve -- and adds `terminal_drawdown_pct` beside it. The repository spent
 # from its first version to 2026-09-05 with two definitions under one name,
@@ -90,8 +93,8 @@ TPEX_MARKET = "TPEX"
 # fields -- a reader asking "does this report satisfy the current contract"
 # is told no by a report that does. It survived because the schema id is what
 # the writer thinks about and the contract string is what a consumer reads.
-CANDIDATE_REPORT_SCHEMA = "tw-alpha-m6-candidate-report/1.4.0"
-CANDIDATE_REPORT_CONTRACT = "candidate-report-v1.4.0"
+CANDIDATE_REPORT_SCHEMA = "tw-alpha-m6-candidate-report/1.5.0"
+CANDIDATE_REPORT_CONTRACT = "candidate-report-v1.5.0"
 
 # The median stop distance measured across the SEPA trades in M6 Phase 0.
 # Used only to turn the risk budget into a position size when deriving the
@@ -116,6 +119,12 @@ PARTICIPATION_RATE = Decimal("0.01")
 # universes returned -37.76% and -3.57% at the reference scale, which is not a
 # sensitivity band, it is two different books.
 UNIVERSES = ("all", "no-tpex-odd-lot-entry")
+
+
+# The marker that separates a fabricated disposal from every other row in
+# `trades`. Named once so a report cannot carry a typo that silently makes a
+# disposal look like a market fill.
+DISPOSAL_FILL_BASIS = "fabricated-delisting-disposal"
 
 
 def lot_legs(quantity: int) -> list[int]:
@@ -1254,6 +1263,100 @@ def run(
         for key in list(positions):
             position = positions[key]
             row = rows.get(key)
+            if (
+                row is not None
+                and row.close is None
+                and row.membership_state == "delisted"
+                and position.last_close is not None
+            ):
+                # **A disposal at the last observed close. Owner decision:
+                # proposal 003, option 乙, 2026-09-05.**
+                #
+                # This fill did not happen. The security is not trading, the
+                # warehouse says so, and the account could not have sold it.
+                # Everything below is fabricated on purpose and named so:
+                #
+                #   session_is_open      True, though the security had no
+                #                        session of its own
+                #   tradability_state    the tradable value, though the
+                #                        warehouse says the security is off
+                #                        every board
+                #   available_quantity   the whole position, though the
+                #                        published volume is null
+                #   limit_up/limit_down  None, so no band is applied to a
+                #                        price no band was published for
+                #
+                # `MarketConditions` says a caller that has not looked up the
+                # state has to say so rather than take a permissive default it
+                # never chose. This caller has looked it up, the state refuses
+                # the trade, and the decision was to trade anyway. Saying so is
+                # what this comment is.
+                #
+                # **Recommended against** in proposal 003 section 3, for one
+                # reason worth keeping visible: the previous behaviour is what
+                # surfaced `inverse-volatility-60` selecting securities that
+                # stop trading at 8x the random rate, because the account
+                # visibly locked up instead of quietly booking a disposal.
+                # That signal is now carried by `delisted_disposals` instead of
+                # by a frozen account, and it has to be read for the finding to
+                # survive.
+                #
+                # Costs are charged as on any sale. A delisting is not a sale
+                # and would not incur them, but inventing a fill *and* waiving
+                # its costs would flatter the account twice.
+                disposal_price = position.last_close
+                legs = lot_legs(position.quantity)
+                for leg in legs:
+                    order_seq += 1
+                    result = ledger.execute(
+                        OrderRequest(
+                            order_id=f"d{order_seq}",
+                            fill_id=f"d{order_seq}",
+                            session=as_date,
+                            symbol=position.symbol,
+                            side=Side.SELL,
+                            quantity=leg,
+                            limit_price=disposal_price,
+                        ),
+                        MarketConditions(
+                            session=as_date,
+                            session_is_open=True,
+                            tradability_state=TRADABLE_STATE,
+                            limit_up=None,
+                            limit_down=None,
+                            available_quantity=leg,
+                        ),
+                    )
+                    if result.state in ("filled", "partially-filled"):
+                        trades.append(
+                            {
+                                "market": position.market,
+                                "symbol": position.symbol,
+                                "entry_session": position.entry_session,
+                                "exit_session": session,
+                                "entry_price": float(position.entry_price),
+                                "exit_price": float(result.fill_price or disposal_price),
+                                "quantity": result.filled_quantity,
+                                "exit_reason": "delisted-disposal",
+                                "holding_sessions": index
+                                - sessions.index(position.entry_session),
+                                "stop_price": float(position.stop_price),
+                                "target_price": (
+                                    None
+                                    if position.target_price is None
+                                    else float(position.target_price)
+                                ),
+                                # The one field that separates this from every
+                                # other row in `trades`.
+                                "fill_basis": DISPOSAL_FILL_BASIS,
+                            }
+                        )
+                        position.quantity -= result.filled_quantity
+                    else:
+                        refusals[f"disposal:{result.reason}"] += 1
+                if position.quantity <= 0:
+                    del positions[key]
+                    continue
             if row is None or row.close is None:
                 # **The account cannot sell what is not trading, and that is
                 # correct.** Every exit here needs a price: the stop reads
@@ -1706,6 +1809,21 @@ def run(
         )
         if equity
         else 0.0,
+        # D27's required columns. Zero when nothing was disposed of -- not
+        # omitted, because a report without the field and a report with none
+        # of them have to read differently.
+        "delisted_disposals": sum(
+            1 for t in trades if t.get("fill_basis") == DISPOSAL_FILL_BASIS
+        ),
+        "nav_in_delisted_disposals": float(
+            sum(
+                Decimal(str(t["exit_price"])) * t["quantity"]
+                for t in trades
+                if t.get("fill_basis") == DISPOSAL_FILL_BASIS
+            )
+            / opening_cash
+            * 100
+        ),
         "open_positions": [
             {
                 "market": position.market,
@@ -1927,6 +2045,10 @@ def candidate_report(
                 # only the maximum would leave the same ambiguity for anyone
                 # who remembers the old field.
                 "terminal_drawdown_pct": float(result["terminal_drawdown_pct"]),
+                "delisted_disposals": int(result["delisted_disposals"]),
+                "nav_in_delisted_disposals": float(
+                    result["nav_in_delisted_disposals"]
+                ),
                 "completed_trades": trades,
                 "cost_total": float(cost),
                 "cost_share_of_capital": float(cost) / float(result["opening_cash"]),

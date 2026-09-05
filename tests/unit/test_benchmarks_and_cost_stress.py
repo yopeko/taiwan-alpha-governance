@@ -520,7 +520,10 @@ class TestTheReportCarriesTheMinimumComparisonSet:
 
         Pinned at 1.3.0 when the M0 section 9.1 benchmark columns landed, and
         moved to 1.4.0 on 2026-09-05 when `drawdown_pct` was named as the
-        maximum over the equity curve and `terminal_drawdown_pct` joined it.
+        maximum over the equity curve and `terminal_drawdown_pct` joined it,
+        then to 1.5.0 the same day when D27's delisting-disposal columns
+        landed. A version that moves twice in a day is a version doing its
+        job -- the alternative is two different reports claiming to be 1.4.0.
 
         **The two versions move together.** The producer's `schema_id` and
         `CANDIDATE_REPORT_CONTRACT` were out of step for a day in September
@@ -529,11 +532,11 @@ class TestTheReportCarriesTheMinimumComparisonSet:
         """
 
         assert (
-            'CANDIDATE_REPORT_SCHEMA = "tw-alpha-m6-candidate-report/1.4.0"'
+            'CANDIDATE_REPORT_SCHEMA = "tw-alpha-m6-candidate-report/1.5.0"'
             in self.DRIVER
         )
-        assert 'CANDIDATE_REPORT_CONTRACT = "candidate-report-v1.4.0"' in self.DRIVER
-        assert "candidate-report-v1.4.0" in self.CONTRACT
+        assert 'CANDIDATE_REPORT_CONTRACT = "candidate-report-v1.5.0"' in self.DRIVER
+        assert "candidate-report-v1.5.0" in self.CONTRACT
 
     def test_the_contract_says_which_drawdown(self):
         """自 v1.0.0 起契約要求 `drawdown_pct` 並稱它「最大回撤」，而沒有說是

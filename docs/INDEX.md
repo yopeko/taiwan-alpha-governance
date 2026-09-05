@@ -103,7 +103,9 @@
 - [「最大回撤」一直是期末回撤，而 M0 §8.1 的門檻就是一個回撤門檻](evidence/m6-drawdown-was-terminal-not-maximum-2026-09-05.md)
 - [低波動候選重讀：它系統性地挑到會停止交易的股票，報酬 79.4% 是模型估值](evidence/m7-low-volatility-selects-securities-that-stop-trading-2026-09-05.md)
 - [診斷 005 結果：四條法人訊號的排序能力都與零無法區分，本方向結案](evidence/m6-diagnostic-005-result-institutional-rank-quality-2026-09-05.md)
-- [提案 003：一個賣不掉的部位該怎麼辦（待 Owner 裁決）](evidence/m7-proposal-003-positions-that-cannot-be-sold-2026-09-05.md)
+- [提案 003：一個賣不掉的部位該怎麼辦](evidence/m7-proposal-003-positions-that-cannot-be-sold-2026-09-05.md)
+- [Owner 決定 D27：下市持股以最後收盤價強制處分，而那筆成交沒有發生過](evidence/m3-owner-decision-d27-2026-09-05.md)
+- [D27 之後的重跑：48 個臂，既有結論全部存活，而臂 A 的回撤欄位從 0.00% 變成 59.27%](evidence/m7-rerun-after-d27-2026-09-05.md)
 
 ## M7 巢狀驗證、候選與比較
 

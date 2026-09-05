@@ -75,11 +75,20 @@ class TestTheDriverImplementsIt:
     def test_a_missing_open_falls_back_to_the_close_not_to_the_stop(self):
         """A session with no published open is rare and must not silently
         restore the old optimistic behaviour. Falling back to the close keeps
-        the fill inside prices that did trade."""
+        the fill inside prices that did trade.
 
-        block = SOURCE.split("# --- exits first")[1].split("legs = lot_legs")[0]
-        assert "else close" in block
-        assert "row.open" in block
+        Asserted on the line itself. This used to slice the source from
+        `# --- exits first` to the first `legs = lot_legs`, and D27's disposal
+        branch put a `lot_legs` call inside that window on 2026-09-05 -- so the
+        slice stopped short and the assertion failed on code it was not about.
+        **A test scoped by where other code happens to sit is a test that
+        breaks for the wrong reason.**
+        """
+
+        assert (
+            "opened = Decimal(str(row.open)) if row.open is not None else close"
+            in SOURCE
+        )
 
     def test_the_reason_code_is_unchanged(self):
         """The exit is still a stop. Only the price it fills at moved, and a
