@@ -1336,6 +1336,21 @@ def run(
                             "exit_price": float(result.fill_price or price),
                             "quantity": result.filled_quantity,
                             "exit_reason": reason,
+                            # Everything below is derivable from the four
+                            # fields above **plus state this loop has and a
+                            # reader does not**. `holding_sessions` needs the
+                            # calendar, and the stop and target need the
+                            # position. Left out, a reader reconciling this
+                            # against another backtester can see that a trade
+                            # closed but not why it closed there.
+                            "holding_sessions": index
+                            - sessions.index(position.entry_session),
+                            "stop_price": float(position.stop_price),
+                            "target_price": (
+                                None
+                                if position.target_price is None
+                                else float(position.target_price)
+                            ),
                         }
                     )
                     position.quantity -= result.filled_quantity
@@ -1620,6 +1635,34 @@ def run(
                 "except when the session opened at or above the target"
             ),
         },
+        # `open_at_end` was a count. A count says one position survived and
+        # not which, and its mark-to-market is inside `final_nav` -- so the
+        # single largest unexplained number in a losing report was invisible.
+        "open_positions": [
+            {
+                "market": position.market,
+                "symbol": position.symbol,
+                "entry_session": position.entry_session,
+                "entry_price": float(position.entry_price),
+                "quantity": position.quantity,
+                "stop_price": float(position.stop_price),
+                "target_price": (
+                    None
+                    if position.target_price is None
+                    else float(position.target_price)
+                ),
+                "holding_sessions": len(sessions)
+                - 1
+                - sessions.index(position.entry_session),
+                "last_close": (
+                    None
+                    if by_session[sessions[-1]].get(key) is None
+                    or by_session[sessions[-1]][key].close is None
+                    else float(by_session[sessions[-1]][key].close)
+                ),
+            }
+            for key, position in sorted(positions.items())
+        ],
         "opening_cash": float(opening_cash),
         "final_nav": final_nav,
         "return_pct": (final_nav / float(opening_cash) - 1) * 100,
