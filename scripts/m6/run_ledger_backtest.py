@@ -589,6 +589,14 @@ class OpenPosition:
     # day of entry the high is not yet known when the position opens, and
     # using it would let a stop be set from a price that had not happened.
     peak_high: Decimal = Decimal("0")
+    # Where a reward-to-risk exit sits, or None when the strategy has none.
+    #
+    # **Derived from the fill, not from the signal.** The stop comes from the
+    # signal session's close and the entry happens at the next session's open,
+    # so the realised risk is `entry - stop` and is not the risk the signal
+    # planned. Measuring the target from the planned risk would put the target
+    # 2.5x a distance the account is not actually carrying.
+    target_price: Decimal | None = None
 
 
 # The sixteen columns this driver reads, out of the dataset's twenty-six.
@@ -767,12 +775,193 @@ def breakout_signals(
     return signals
 
 
+# --- weekly MACD screen ------------------------------------------------
+#
+# Three conditions, all of which must hold, plus a reward-to-risk exit. The
+# specification is the owner's, given 2026-09-05; every number below is theirs
+# except where this comment says otherwise.
+#
+#   1. a golden cross on the weekly MACD
+#   2. top 30 of the listed market by five-session volume
+#   3. top 30 of the listed market by five-session three-institution net buy
+#
+# 上市 is TWSE. It is part of the strategy rather than a `--universe` mode,
+# because `--universe` answers "which securities may this account enter at
+# all" and this answers "which securities does this strategy want".
+
+MACD_FAST_WEEKS = 12
+MACD_SLOW_WEEKS = 26
+MACD_SIGNAL_WEEKS = 9
+SCREEN_TOP_N = 30
+SCREEN_CUMULATIVE_SESSIONS = 5
+# The score the screen orders by, named so a report can say what the fills
+# followed. It is the third condition's own number, reused: adding a separate
+# ranking would be a fourth parameter nobody specified.
+SCREEN_ORDERING = "screen:five-session-institutional-net"
+LISTED_MARKET = "TWSE"
+
+# 26 weeks for the slow average, 9 more before the signal line means anything,
+# and a spare week so the cross has a previous week to compare against. Times
+# five sessions, which over-counts a holiday week -- the safe direction, since
+# too much history costs memory and too little silently scores nothing.
+SCREEN_HISTORY_SESSIONS = (MACD_SLOW_WEEKS + MACD_SIGNAL_WEEKS + 1) * 5
+
+
+def weekly_closes(bars: list["Bar"]) -> list[float]:
+    """One close per **completed** ISO week, oldest first.
+
+    The week in progress is dropped. A cross that appears on Wednesday and is
+    gone by Friday is not a weekly cross, and admitting the partial week would
+    make the signal depend on which weekday it was read -- the same rule would
+    fire on different securities depending on when it ran.
+
+    The cost is up to four sessions of staleness: a cross formed at Friday's
+    close is acted on from the following Monday. That is what a weekly chart
+    actually offers, and it is stated rather than optimised away.
+    """
+
+    weeks: list[list] = []
+    for bar in bars:
+        if bar.close is None:
+            continue
+        year, week, _ = date.fromisoformat(bar.session_date).isocalendar()
+        if weeks and weeks[-1][0] == (year, week):
+            weeks[-1][1] = float(bar.close)
+        else:
+            weeks.append([(year, week), float(bar.close)])
+    # The last entry is the week the current session sits in, still open.
+    return [close for _, close in weeks[:-1]]
+
+
+def _ema(values: list[float], span: int) -> list[float] | None:
+    """Seeded with the simple average of the first `span` values.
+
+    Returns one value per input from index `span - 1` onward, so a caller can
+    tell how many are real rather than warmup.
+    """
+
+    if len(values) < span:
+        return None
+    multiplier = 2.0 / (span + 1)
+    out = [sum(values[:span]) / span]
+    for value in values[span:]:
+        out.append((value - out[-1]) * multiplier + out[-1])
+    return out
+
+
+def macd_golden_cross(weeks: list[float]) -> bool:
+    """Did MACD cross above its signal line on the last completed week?
+
+    Standard 12/26/9 on weekly closes. A cross means the line was at or below
+    the signal a week earlier and is above it now; a line that has been above
+    for months is not a cross, and treating it as one would turn an event into
+    a state and enter on every session of a long trend.
+    """
+
+    fast = _ema(weeks, MACD_FAST_WEEKS)
+    slow = _ema(weeks, MACD_SLOW_WEEKS)
+    if fast is None or slow is None:
+        return False
+    # `fast` begins earlier than `slow`; align on the later start.
+    offset = MACD_SLOW_WEEKS - MACD_FAST_WEEKS
+    line = [f - s for f, s in zip(fast[offset:], slow)]
+    signal = _ema(line, MACD_SIGNAL_WEEKS)
+    if signal is None or len(signal) < 2:
+        return False
+    # `signal` is shorter than `line` by its own warmup.
+    tail = line[-len(signal):]
+    return tail[-2] <= signal[-2] and tail[-1] > signal[-1]
+
+
+def _five_session_sum(bars: list["Bar"], field: str) -> float | None:
+    return _cumulative(bars, len(bars) - 1, field, SCREEN_CUMULATIVE_SESSIONS)
+
+
+def weekly_macd_screen_signals(
+    history: dict,
+    session: str,
+    *,
+    stop_pct: Decimal,
+    stop_rule: str = "fixed",
+) -> list[Signal]:
+    """The three conditions, ANDed, on the listed market.
+
+    The two rankings are cross-sectional: a security is in the top 30 relative
+    to the other listed securities **that had a readable five-session total on
+    this session**, not relative to a fixed list. A security missing either
+    total is out of both the numerator and the denominator, which is the only
+    reading that does not silently promote a name because its neighbours had a
+    null.
+
+    Where more names qualify than there are slots they are ordered by the
+    institutional total -- **declared here rather than left to dict order**,
+    which is the arrival ordering owner decision 4 was amended about.
+    """
+
+    volumes: dict = {}
+    nets: dict = {}
+    live: dict = {}
+    for key, bars in history.items():
+        if key[0].upper() != LISTED_MARKET:
+            continue
+        today = bars[-1]
+        if today.session_date != session or today.close is None:
+            continue
+        volume = _five_session_sum(bars, "volume")
+        net = _five_session_sum(bars, "total_net_prior_session")
+        if volume is None or net is None:
+            continue
+        live[key] = bars
+        volumes[key] = volume
+        nets[key] = net
+
+    top_volume = {
+        key for key, _ in sorted(volumes.items(), key=lambda kv: -kv[1])[:SCREEN_TOP_N]
+    }
+    top_net = {
+        key for key, _ in sorted(nets.items(), key=lambda kv: -kv[1])[:SCREEN_TOP_N]
+    }
+
+    signals: list[Signal] = []
+    for key in top_volume & top_net:
+        bars = live[key]
+        if not macd_golden_cross(weekly_closes(bars)):
+            continue
+        closes = [b.close for b in bars]
+        if any(c is None for c in closes):
+            continue
+        distance = stop_distance(closes, len(bars) - 1, stop_rule, stop_pct)
+        if distance is None:
+            continue
+        close = Decimal(str(bars[-1].close))
+        signals.append(
+            Signal(
+                key[0],
+                key[1],
+                stop_price=close * (Decimal("1") - distance),
+                score=nets[key],
+            )
+        )
+    signals.sort(key=lambda s: s.score, reverse=True)
+    return signals
+
+
 # Rebalance cadence for the rank-only entry, in sessions. 21 is the
 # conventional monthly session count, the same conversion the 12-1 momentum
 # lookback already makes. Not searched over: one cadence, declared here.
 REBALANCE_SESSIONS = 21
 
-ENTRY_RULES = ("breakout", "rank-only")
+ENTRY_RULES = ("breakout", "rank-only", "weekly-macd-screen")
+
+# How much history each entry rule needs, declared beside the rules for the
+# reason `RANKING_HISTORY_SESSIONS` exists: a rule left out of the calculation
+# gets the breakout depth, and a weekly average read against twenty-two daily
+# bars returns nothing at all -- no error, no signal, an empty report.
+ENTRY_HISTORY_SESSIONS: dict[str, int] = {
+    "breakout": 0,
+    "rank-only": 0,
+    "weekly-macd-screen": SCREEN_HISTORY_SESSIONS,
+}
 
 
 def rank_only_signals(
@@ -892,6 +1081,7 @@ def run(
     participation_rate: Decimal = PARTICIPATION_RATE,
     first_trading_session: str | None = None,
     entry_rule: str = "breakout",
+    reward_risk: Decimal | None = None,
     stop_rule: str = "fixed",
     max_positions: int | None = None,
     cost_multiplier: Decimal = Decimal("1"),
@@ -911,6 +1101,18 @@ def run(
     trades: list[dict[str, Any]] = []
     refusals: dict[str, int] = defaultdict(int)
     ranking = RANKINGS[ranking_name]
+    # What the fills were ordered by, which is not always `--ranking`.
+    #
+    # The screen sorts its own signals and fills `Signal.score`, so the
+    # ordering is declared and the rank-violation columns can be measured
+    # against it. Reporting an empty `ranking_function` because no `--ranking`
+    # was passed would say "fills followed arrival order" about a run whose
+    # order is written down two hundred lines above -- and the candidate
+    # report contract uses that field to decide whether the row may rank
+    # candidates at all.
+    ordered_by = (
+        SCREEN_ORDERING if entry_rule == "weekly-macd-screen" else ranking_name
+    )
 
     # Candidate plan 006 section 2.2. `POLICY_MAX_POSITIONS` lives in
     # `m5/ledger.py`, a byte-identical mirror of Taiwan Core, so it cannot be
@@ -929,7 +1131,9 @@ def run(
     # ranking. Trimming to the breakout lookback alone left 22 bars, and a
     # 252-session momentum read against 22 bars scores nothing at all.
     history_depth = max(
-        lookback + 2, RANKING_HISTORY_SESSIONS[ranking_name] + 2
+        lookback + 2,
+        RANKING_HISTORY_SESSIONS[ranking_name] + 2,
+        ENTRY_HISTORY_SESSIONS[entry_rule] + 2,
     )
     # Sessions where a candidate refused for capacity outscored one that was
     # opened. Zero is the claim that fills followed the ranking.
@@ -1042,7 +1246,25 @@ def run(
                 )
 
             reason = None
-            if low <= position.stop_price:
+            target = position.target_price
+            if target is not None and opened >= target:
+                # **The one case where the stop does not come first.**
+                #
+                # A take-profit is a limit sell. If the session opened at or
+                # above it, that order filled in the opening auction, before
+                # any subsequent fall could reach the stop -- so a session
+                # that gapped through the target and then collapsed exits at
+                # the open, not at the stop. Ordering this after the stop
+                # check would hand the account a loss it had already sold out
+                # of, which is not conservatism, it is the wrong session.
+                #
+                # The fill is the open rather than the target for the same
+                # reason a gapped stop fills at the open: the target price
+                # never traded. Here that favours the account, and it is the
+                # same rule either way -- an order fills at a price the
+                # session actually had.
+                reason, price = "target", opened
+            elif low <= position.stop_price:
                 # Conservative: when a session touches both the stop and a
                 # profitable level, the stop is assumed to come first. Daily
                 # bars cannot say which did, and this errs against the account.
@@ -1065,6 +1287,13 @@ def run(
                 # hard, and momentum holds recent winners.
                 reason = "stop"
                 price = min(position.stop_price, opened)
+            elif target is not None and high >= target:
+                # Touched intraday without gapping through it, so the limit
+                # filled at its own price. Reached only when the stop was not
+                # touched: a session that touched both is resolved above,
+                # against the account, because a daily bar cannot say which
+                # came first.
+                reason, price = "target", target
             elif entry_rule == "rank-only":
                 # Held until it leaves the top N on a rebalance, not until it
                 # gets old. A holding period is a parameter; membership of the
@@ -1207,6 +1436,13 @@ def run(
                     entry_session=session,
                     entry_price=result.fill_price or entry,
                     stop_price=signal.stop_price,
+                    target_price=(
+                        None
+                        if reward_risk is None
+                        else (result.fill_price or entry)
+                        + reward_risk
+                        * ((result.fill_price or entry) - signal.stop_price)
+                    ),
                     quantity=result.filled_quantity,
                     # Not the entry session's high: that price had not
                     # happened when the position opened.
@@ -1259,6 +1495,21 @@ def run(
                 ][:slots]
             else:
                 pending = []
+        elif entry_rule == "weekly-macd-screen":
+            # Checked every session, not on a cadence. The signal is an event
+            # on a completed week, so it is already the same for every session
+            # inside that week; adding a rebalance period on top would decide
+            # which weekday the account is allowed to notice.
+            pending = [
+                s
+                for s in weekly_macd_screen_signals(
+                    history,
+                    session,
+                    stop_pct=stop_pct,
+                    stop_rule=stop_rule,
+                )
+                if rows[(s.market, s.symbol)].tradability_state == TRADABLE_STATE
+            ]
         else:
             pending = [
                 s
@@ -1282,11 +1533,13 @@ def run(
             (dataset_root / "dataset_manifest.json").read_bytes()
         )["sha256"],
         "strategy": {
-            "name": (
-                "close-above-n-session-high"
-                if entry_rule == "breakout"
-                else "hold-top-n-by-score"
-            ),
+            "name": {
+                "breakout": "close-above-n-session-high",
+                "rank-only": "hold-top-n-by-score",
+                "weekly-macd-screen": (
+                    "weekly-macd-cross-in-top-30-volume-and-institutional"
+                ),
+            }[entry_rule],
             "entry_rule": entry_rule,
             "stop_rule": stop_rule,
             "rebalance_sessions": (
@@ -1295,25 +1548,49 @@ def run(
             # True of the unranked form, and it stayed in the manifest after a
             # ranking made it a candidate. Derived now instead of asserted.
             "note": (
-                "a candidate ranked by " + ranking_name
+                "an owner-specified screen: weekly MACD golden cross, top 30 "
+                "listed by five-session volume, top 30 listed by five-session "
+                "three-institution net buy"
+                if entry_rule == "weekly-macd-screen"
+                else "a candidate ranked by " + ranking_name
                 if ranking_name
                 else "a pipeline probe, not a proposal"
+            ),
+            # Only the screen uses these. Reported as null elsewhere rather
+            # than omitted, so a reader comparing two reports sees the same
+            # keys and can tell an unused parameter from a forgotten one.
+            "screen": (
+                {
+                    "market": LISTED_MARKET,
+                    "top_n": SCREEN_TOP_N,
+                    "cumulative_sessions": SCREEN_CUMULATIVE_SESSIONS,
+                    "macd_weeks": [
+                        MACD_FAST_WEEKS,
+                        MACD_SLOW_WEEKS,
+                        MACD_SIGNAL_WEEKS,
+                    ],
+                    "weekly_bars": "completed ISO weeks only",
+                    "tie_break": "five-session institutional net, descending",
+                }
+                if entry_rule == "weekly-macd-screen"
+                else None
             ),
             "lookback": lookback,
             "stop_pct": float(stop_pct),
             "max_holding_sessions": max_holding_sessions,
+            "reward_risk": None if reward_risk is None else float(reward_risk),
             # Empty means no ranking, and that is an honest answer rather than
             # a missing field: the entry loop then walks `pending` in whatever
             # order the signals were generated, so which names it holds is
             # decided by arrival order. ADR-0002 decision 4, as amended on
             # 2026-08-26, marks such a run `selection-logic-not-measured`.
-            "ranking_function": ranking_name,
+            "ranking_function": ordered_by,
             # What applied, not what was requested. A run that asked for 12
             # and got 10 must not read as a 12-slot run.
             "max_positions": slots,
         },
-        "rank_violations_scarcity": scarcity_violations if ranking_name else -1,
-        "rank_violations_sizing": sizing_violations if ranking_name else -1,
+        "rank_violations_scarcity": scarcity_violations if ordered_by else -1,
+        "rank_violations_sizing": sizing_violations if ordered_by else -1,
         "rank_violation_codes": dict(
             sorted(violation_codes.items(), key=lambda kv: -kv[1])
         ),
@@ -1333,7 +1610,15 @@ def run(
             "universe": universe,
             "first_trading_session": first_trading_session,
             "universe_effect": dict(suppressed),
-            "stop_assumed_to_precede_target_within_a_session": True,
+            # True where both were touched inside one session, which a daily
+            # bar cannot order. **Not true when the session opened at or above
+            # the target**: that limit filled in the opening auction, before
+            # any fall could reach the stop, and the exit block resolves it
+            # that way. Written as it behaves rather than as it was first
+            # declared, when nothing could take a profit at all.
+            "stop_assumed_to_precede_target_within_a_session": (
+                "except when the session opened at or above the target"
+            ),
         },
         "opening_cash": float(opening_cash),
         "final_nav": final_nav,
@@ -1654,6 +1939,16 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--reward-risk",
+        type=Decimal,
+        default=None,
+        help=(
+            "exit at entry plus this multiple of the entry-to-stop distance. "
+            "Omitted, positions have no profit target and leave on the stop, "
+            "the holding limit or the strategy's own rule."
+        ),
+    )
+    parser.add_argument(
         "--universe",
         choices=UNIVERSES,
         default="all",
@@ -1704,6 +1999,7 @@ def main(argv: list[str] | None = None) -> int:
         participation_rate=args.participation_rate,
         first_trading_session=args.first_trading_session,
         entry_rule=args.entry,
+        reward_risk=args.reward_risk,
         stop_rule=args.stop_rule,
         max_positions=args.max_positions,
         cost_multiplier=args.cost_multiplier,

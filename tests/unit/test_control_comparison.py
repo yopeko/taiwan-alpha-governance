@@ -271,12 +271,28 @@ class TestItRefusesAComparisonThatCannotSayAnything:
 
     def test_the_entry_rule_makes_two_candidates_different(self):
         """The axis that was missing. Same ranking, different entry, is the
-        comparison candidate plan 003 exists to run."""
+        comparison candidate plan 003 exists to run.
+
+        Asserted as "these are on the axis", not as "these are all of it".
+        The set was frozen at two until 2026-09-05, when an owner-specified
+        screen became a third -- and the comparison contract never named a
+        fixed pair, so the exact-set form was tighter than the thing it was
+        guarding. A test that has to be edited to add a legitimate rule
+        teaches people to edit tests.
+
+        The count is still checked, because an entry rule appearing without
+        anyone noticing is the other failure.
+        """
 
         sys.path.insert(0, str(REPO / "scripts" / "m6"))
         from run_ledger_backtest import ENTRY_RULES
 
-        assert set(ENTRY_RULES) == {"breakout", "rank-only"}
+        assert {"breakout", "rank-only"} <= set(ENTRY_RULES)
+        assert set(ENTRY_RULES) == {
+            "breakout",
+            "rank-only",
+            "weekly-macd-screen",
+        }, "an entry rule was added; say so here and in the evidence"
 
 
 class TestTheContractDocumentSaysWhatTheCodeDoes:
