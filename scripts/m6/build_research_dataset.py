@@ -15,7 +15,29 @@ What each row carries
   action, and the tradability those combine into;
 * the reason codes behind that verdict, so a strategy that was refused a trade
   can say which rule refused it;
-* the price limits for the session.
+* the price limits for the session;
+* the three-institution net-buy figures **for the previous session**, because
+  that is the most recent report a decision taken at this session's open could
+  have read.
+
+The institutional lag is the shape of the data, not a rule a strategy has to
+remember
+------------------------------------------------------------------------------
+Both exchanges publish the net-buy report after the close. A rank taken on
+session T's own figures and acted on at T's open is look-ahead, and it is the
+kind that produces beautiful results.
+
+So the same-session figures are **not in this dataset at all**. Every
+institutional column here is named `..._prior_session` and carries session
+T-1's published report on session T's row. There is nothing to remember and
+nothing to shift; a strategy that reads the column naively is already correct,
+and a strategy that wants the same-session number cannot get it from here.
+
+Absence in that report means no institutional order flow, not a missing value
+-- measured on the lane itself, where the securities with no row have a median
+volume an order of magnitude below the ones that do. So a security the
+exchange quoted on T-1 with no row gets **zero**; a security it did not quote
+gets **null**. Those are different facts and the dataset keeps them apart.
 
 The limits are the exception. Where the exchange published them — every
 ex-rights, capital-reduction and par-value-change session — they are copied.
@@ -52,9 +74,39 @@ sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "scripts" / "m3"))
 
 from asof import Warehouse, default_warehouse  # noqa: E402
+from current_build import INSTITUTIONAL  # noqa: E402
 from m4.rules import RuleError, price_limits, resolve_price_limits  # noqa: E402
 
-SCHEMA_ID = "tw-alpha-m6-research-dataset/1.0.0"
+SCHEMA_ID = "tw-alpha-m6-research-dataset/1.1.0"
+
+# The four measures carried forward. Not all eight the lane holds: these are
+# the ones a strategy ranks on, and every column costs memory in a backtest
+# that already reads 3.9 million rows.
+#
+# `foreign_net` excludes foreign dealers on both markets, which is what makes
+# it comparable across them -- TWSE publishes no foreign subtotal at all, so
+# the alternative would be a column that exists for one market.
+INSTITUTIONAL_MEASURES = (
+    "foreign_net",
+    "investment_trust_net",
+    "dealer_net",
+    "total_net",
+)
+# Spelled out rather than generated. `test_dataset_columns` reads the schema
+# below by scanning for quoted field-name literals, so a computed name is a
+# column the guard cannot see -- and a guard that silently covers less than it
+# claims is the failure mode that test was written about. (Writing that scan's
+# own pattern into this comment put a phantom column into the schema and
+# failed a different check, which is the same shape one layer up.)
+INSTITUTIONAL_COLUMNS = (
+    "foreign_net_prior_session",
+    "investment_trust_net_prior_session",
+    "dealer_net_prior_session",
+    "total_net_prior_session",
+)
+assert INSTITUTIONAL_COLUMNS == tuple(
+    f"{m}_prior_session" for m in INSTITUTIONAL_MEASURES
+)
 
 SCHEMA = pa.schema(
     [
@@ -80,6 +132,10 @@ SCHEMA = pa.schema(
         pa.field("limit_down", pa.float64(), nullable=True),
         pa.field("limit_basis", pa.string(), nullable=False),
         pa.field("previous_close", pa.float64(), nullable=True),
+        pa.field("foreign_net_prior_session", pa.int64(), nullable=True),
+        pa.field("investment_trust_net_prior_session", pa.int64(), nullable=True),
+        pa.field("dealer_net_prior_session", pa.int64(), nullable=True),
+        pa.field("total_net_prior_session", pa.int64(), nullable=True),
     ]
 )
 
@@ -158,7 +214,114 @@ def previous_closes(warehouse: Warehouse) -> dict[tuple[str, str], list[tuple[st
     return series
 
 
-def build(out_root: Path, *, sessions: int | None = None) -> dict[str, Any]:
+class InstitutionalReports:
+    """The net-buy lane, read one session at a time and never all at once.
+
+    24.6 million rows keyed by market, symbol and session is about five
+    gigabytes as a Python dict, and the caller needs exactly one session of it
+    at a time. The table is written sorted by session, so streaming it in
+    lockstep with the calendar costs one session's worth of memory -- roughly
+    thirteen thousand entries -- instead of all of it.
+    """
+
+    def __init__(self, root: Path) -> None:
+        self._path = root / "institutional_pit.parquet"
+        if not self._path.is_file():
+            raise SystemExit(
+                f"no institutional table at {self._path}. Build it before the "
+                f"dataset, or the columns would be silently null"
+            )
+        self._stream = self._sessions()
+        self._head: tuple[str, dict] | None = next(self._stream, None)
+
+    def _sessions(self):
+        columns = ["session_date", "market", "symbol", *INSTITUTIONAL_MEASURES]
+        session, found = None, {}
+        for batch in pq.ParquetFile(self._path).iter_batches(
+            batch_size=200_000, columns=columns
+        ):
+            values = {name: batch.column(name).to_pylist() for name in columns}
+            for i in range(batch.num_rows):
+                if values["session_date"][i] != session:
+                    if session is not None:
+                        yield session, found
+                    session, found = values["session_date"][i], {}
+                found[(values["market"][i], values["symbol"][i])] = tuple(
+                    values[m][i] for m in INSTITUTIONAL_MEASURES
+                )
+        if session is not None:
+            yield session, found
+
+    def report_for(self, session: str) -> dict:
+        """What was published for `session`, or empty if nothing was.
+
+        Sessions before `session` are discarded; a head beyond it is left
+        alone, so a calendar session the lane does not cover returns empty
+        rather than silently handing back a neighbour's figures.
+        """
+
+        while self._head is not None and self._head[0] < session:
+            self._head = next(self._stream, None)
+        if self._head is not None and self._head[0] == session:
+            found = self._head[1]
+            self._head = next(self._stream, None)
+            return found
+        return {}
+
+
+NOT_REPORTED = (None,) * len(INSTITUTIONAL_MEASURES)
+NO_FLOW = (0,) * len(INSTITUTIONAL_MEASURES)
+
+
+def institutional_for(
+    market: str,
+    symbol: str,
+    prior_session: str | None,
+    prior_report: dict,
+    quoted: Any,
+) -> tuple[tuple[int | None, ...], str]:
+    """What the previous session's report said about this security, and which
+    of three cases that was.
+
+    The case is returned rather than inferred from the values. A security the
+    exchange listed with four zeroes is `reported`, not `zero-quoted-no-flow`
+    -- the first version read the case back off the numbers and put those rows
+    in the wrong bucket, which would have understated institutional coverage
+    in the manifest by however many genuine flat rows exist.
+
+    Three outcomes, and they are three different facts rather than three
+    spellings of "no data":
+
+        reported            the exchange listed it; the figures are its own
+        zero                the exchange quoted it that session and no
+                            institution traded it -- measured on the lane,
+                            where the securities with no row have a median
+                            volume an order of magnitude below the ones that
+                            do, and the largest absent TWSE names on a sample
+                            session closed at 0.73, 1.80 and 2.51
+        null                it was not quoted that session, so its absence
+                            from the report says nothing about institutional
+                            interest
+
+    Collapsing the middle two would either invent a zero for a security that
+    did not exist, or throw away the only signal a screen for "no
+    institutional interest" could use. `quoted` answers which case it is and
+    is asked of the price warehouse, not assumed.
+    """
+
+    if prior_session is None:
+        return NOT_REPORTED, "null-not-quoted"
+    reported = prior_report.get((market, symbol))
+    if reported is not None:
+        return reported, "reported"
+    if (market, symbol, prior_session) in quoted:
+        return NO_FLOW, "zero-quoted-no-flow"
+    return NOT_REPORTED, "null-not-quoted"
+
+
+def build(
+    out_root: Path, *, sessions: int | None = None, institutional: Path | None = None
+) -> dict[str, Any]:
     if out_root.exists() and any(out_root.iterdir()):
         raise SystemExit(f"output root must be empty: {out_root}")
     warehouse = default_warehouse()
@@ -181,6 +344,14 @@ def build(out_root: Path, *, sessions: int | None = None) -> dict[str, Any]:
     closes = previous_closes(warehouse)
     previous: dict[tuple[str, str], Any] = {}
     close_cursor: dict[tuple[str, str], int] = {}
+
+    reports = InstitutionalReports(institutional or INSTITUTIONAL)
+    # What the previous calendar session published, and which session that
+    # was. Both start empty: on the first session of the window there is no
+    # prior report, and null is the honest answer.
+    prior_report: dict = {}
+    prior_session: str | None = None
+    institutional_counts = {"null-not-quoted": 0, "zero-quoted-no-flow": 0, "reported": 0}
 
     rows: list[dict[str, Any]] = []
     limit_basis_counts: dict[str, int] = {}
@@ -226,6 +397,13 @@ def build(out_root: Path, *, sessions: int | None = None) -> dict[str, Any]:
                 basis = "blocked-no-previous-close"
             limit_basis_counts[basis] = limit_basis_counts.get(basis, 0) + 1
 
+            # The previous session's report, which is the most recent one a
+            # decision taken at this session's open could have read.
+            institutional_values, institutional_case = institutional_for(
+                state.market, state.symbol, prior_session, prior_report, prices
+            )
+            institutional_counts[institutional_case] += 1
+
             rows.append(
                 {
                     "market": state.market,
@@ -250,10 +428,17 @@ def build(out_root: Path, *, sessions: int | None = None) -> dict[str, Any]:
                     "limit_down": down,
                     "limit_basis": basis,
                     "previous_close": float(prior) if prior is not None else None,
+                    **dict(zip(INSTITUTIONAL_COLUMNS, institutional_values)),
                 }
             )
             if price is not None and price.get("close") is not None:
                 previous[key] = price["close"]
+
+        # Advance to this session's report so the next one can read it. Done
+        # after the rows, never before -- reading it inside this session is
+        # the look-ahead the whole column exists to prevent.
+        prior_report = reports.report_for(session)
+        prior_session = session
 
     rows.sort(key=lambda r: (r["session_date"], r["market"], r["symbol"]))
     out_root.mkdir(parents=True, exist_ok=True)
@@ -281,6 +466,9 @@ def build(out_root: Path, *, sessions: int | None = None) -> dict[str, Any]:
         "distinct_securities": len({(r["market"], r["symbol"]) for r in rows}),
         "sha256": content_hash,
         "tradability_state_counts": dict(sorted(tradability.items())),
+        "institutional_root": str(institutional or INSTITUTIONAL),
+        "institutional_columns": list(INSTITUTIONAL_COLUMNS),
+        "institutional_value_counts": institutional_counts,
         "limit_basis_counts": dict(sorted(limit_basis_counts.items())),
         "notes": [
             "Prices are the official unadjusted bars; no adjusted series is "
@@ -294,6 +482,19 @@ def build(out_root: Path, *, sessions: int | None = None) -> dict[str, Any]:
             "the after-hours fixed-price session. Owner decision D2 keeps "
             "both as published, so a liquidity threshold has to be set per "
             "market or it quietly excludes TPEx names.",
+            "Institutional columns carry the PREVIOUS session's published "
+            "report, because both exchanges publish after the close and a "
+            "rank taken on a session's own figures and acted on at its open "
+            "is look-ahead. The same-session figures are not in this dataset "
+            "at all, so there is nothing for a strategy to shift.",
+            "In those columns zero and null are different facts: zero means "
+            "the exchange quoted the security that session and no "
+            "institution traded it, null means it was not quoted and its "
+            "absence from the report says nothing.",
+            "TPEx institutional figures include block trades, odd lots and "
+            "omnibus accounts while its price columns exclude odd lots and "
+            "the after-hours session, so the two are drawn on different "
+            "scopes in the same market -- the same shape as volume under D2.",
             "Every security the exchange quoted is here, including ones the "
             "lifecycle source does not cover. They carry "
             "not-in-lifecycle-source and are never eligible. Out of scope is "
@@ -325,8 +526,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--sessions", type=int, help="build only the first N sessions, for a smoke run"
     )
+    parser.add_argument("--institutional", type=Path, default=INSTITUTIONAL)
     args = parser.parse_args(argv)
-    manifest = build(args.out_root, sessions=args.sessions)
+    manifest = build(
+        args.out_root, sessions=args.sessions, institutional=args.institutional
+    )
     print(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True))
     return 0
 

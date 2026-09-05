@@ -38,6 +38,11 @@ WAREHOUSE_ROOTS = {
     "market status and fundamentals": STATUS,
 }
 
+# The three-institution net-buy lane. Built 2026-09-05 from its own capture
+# archive, not from the price warehouse, so it carries its own generation.
+INSTITUTIONAL = SCRATCH / "tw-alpha-m3-institutional-pit-01"
+INSTITUTIONAL_GENERATION = "2026-09-05 two markets, 1,862 sessions, 24,623,814 rows"
+
 # The six-year build, and the warehouse it came from. Its own manifest names
 # that warehouse, so this pair is checked rather than asserted.
 #
@@ -46,14 +51,19 @@ WAREHOUSE_ROOTS = {
 # candidate report since has used dataset-09, so the invariant tests were
 # validating a dataset nothing else touched -- the same shape this file was
 # created to stop, one generation later.
-RESEARCH_DATASET = SCRATCH / "tw-alpha-m6-dataset-10"
-RESEARCH_DATASET_GENERATION = "2026-09-03 window extended, 1,862 sessions"
-# Still 13, and deliberately. dataset-10 was built from it, so the pair has
-# to move together or a test comparing them reads a generation gap as a
-# defect. pit-prices-14 adds `transactions` and changes nothing else -- the
-# other 22 columns are identical row by row -- so the frozen dataset loses
-# nothing by staying where it is until something needs the new column.
-RESEARCH_DATASET_PRICES = SCRATCH / "tw-alpha-m3-pit-prices-13"
+RESEARCH_DATASET = SCRATCH / "tw-alpha-m6-dataset-11"
+RESEARCH_DATASET_GENERATION = (
+    "2026-09-05 dataset-10 plus four lagged institutional columns"
+)
+# Moved to 14 with dataset-11, which was built from it.
+#
+# The claim written here while it was pinned at 13 -- that pit-prices-14 adds
+# `transactions` and changes nothing else -- was checked rather than carried
+# forward: dataset-11 and dataset-10 were compared column by column over all
+# 3,928,820 rows and **all 22 shared columns are identical row for row**. So
+# every artefact built on dataset-10 stays valid and comparable; only its
+# `dataset_sha256` names a different generation.
+RESEARCH_DATASET_PRICES = SCRATCH / "tw-alpha-m3-pit-prices-14"
 
 # The sealed split derived from RESEARCH_DATASET. Named here for the reason
 # everything else in this file is: it was passed as `--out-root` at call time
@@ -63,8 +73,8 @@ RESEARCH_DATASET_PRICES = SCRATCH / "tw-alpha-m3-pit-prices-13"
 # split-01 came from dataset-09 and stays on disk, because every candidate
 # result so far was run on it. Moving the pointer without regenerating would
 # have left the sealed half at 382 sessions while this file said 404.
-SEALED_SPLIT = SCRATCH / "tw-alpha-m7-split-02"
-SEALED_SPLIT_GENERATION = "2026-09-03 from dataset-10, 1,458 development / 404 sealed"
+SEALED_SPLIT = SCRATCH / "tw-alpha-m7-split-03"
+SEALED_SPLIT_GENERATION = "2026-09-05 from dataset-11, 1,458 development / 404 sealed"
 
 # The candidate report the ADR-0002 contract tests read. Named here for the
 # same reason as everything else in this file: five test files once each

@@ -1,6 +1,6 @@
 """The backtest driver may not read a column it did not ask for.
 
-`load_dataset` projects twelve of the dataset's twenty-three columns. That is
+`load_dataset` projects sixteen of the dataset's twenty-six columns. That is
 worth 5.4 GB on a 32 GB machine, and it introduces one failure mode: a column
 read somewhere the projection list forgot arrives as `None`, which is
 indistinguishable from a genuinely absent value. A missing `close` would read
@@ -114,9 +114,20 @@ def test_every_projected_column_exists_in_the_dataset_schema():
 
 
 def test_the_schema_scan_found_the_real_schema():
+    """Including the columns added last. The first version of the
+    institutional fields was written as a generator over a tuple of names, so
+    the literal-scanning regex here saw none of them and this file quietly
+    covered four fewer columns than it claimed."""
+
     schema = dataset_schema()
-    assert len(schema) >= 20, schema
+    assert len(schema) == 26, schema
     assert {"tradability_state", "limit_up", "previous_close"} <= schema
+    assert {
+        "foreign_net_prior_session",
+        "investment_trust_net_prior_session",
+        "dealer_net_prior_session",
+        "total_net_prior_session",
+    } <= schema
 
 
 def test_no_dataset_column_is_read_by_subscript_anywhere():
@@ -144,13 +155,13 @@ def test_no_dataset_column_is_read_by_subscript_anywhere():
 
 def test_the_rows_are_slotted_objects_not_dicts():
     """Measured 2026-09-04 over 3,928,820 rows: 3.37 GB as dicts against
-    0.59 GB as `Bar`. A twelve-key dict carries a hash table for attribute
+    0.59 GB as `Bar`. A dict carries a hash table for attribute
     names the author already knows."""
 
     import run_ledger_backtest as backtest
 
     assert backtest.Bar.__slots__ == backtest.DATASET_COLUMNS
-    assert not hasattr(backtest.Bar(tuple([None] * 12)), "__dict__")
+    assert not hasattr(backtest.Bar(tuple([None] * len(backtest.DATASET_COLUMNS))), "__dict__")
 
 
 def test_a_column_the_projection_forgot_raises_rather_than_reads_as_none():
@@ -180,7 +191,7 @@ def test_sharing_a_value_cannot_change_a_comparison():
     shared = [pool.setdefault(v, v) for v in (12.5, 12.5)]
     assert shared[0] == shared[1] == 12.5 and shared[0] is shared[1]
     # `is None` still works: None is a singleton and is never pooled.
-    assert backtest.Bar(tuple([None] * 12)).close is None
+    assert backtest.Bar(tuple([None] * len(backtest.DATASET_COLUMNS))).close is None
 
 
 def test_the_loader_shares_values_and_says_why():
@@ -192,13 +203,16 @@ def test_the_loader_shares_values_and_says_why():
 
 
 def test_the_projection_is_a_real_saving():
-    """Twelve of twenty-three. If the list ever grows to cover everything the
+    """Sixteen of twenty-six. If the list ever grows to cover everything the
     projection has stopped paying for itself and should be reconsidered rather
-    than left as decoration."""
+    than left as decoration.
+
+    Raised from 12/22 on 2026-09-05 when the institutional columns landed. The
+    cap moves alongside a measurement, never to make a red test green."""
 
     import run_ledger_backtest as backtest
 
-    assert len(backtest.DATASET_COLUMNS) <= 16
+    assert len(backtest.DATASET_COLUMNS) <= 18
     assert "columns=list(DATASET_COLUMNS)" in SOURCE
 
 

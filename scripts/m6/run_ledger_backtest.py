@@ -469,13 +469,13 @@ class OpenPosition:
     peak_high: Decimal = Decimal("0")
 
 
-# The twelve columns this driver actually reads, out of the dataset's
-# twenty-three. Projected at read time rather than carried and ignored.
+# The sixteen columns this driver reads, out of the dataset's twenty-six.
+# Projected at read time rather than carried and ignored.
 #
 # Measured 2026-09-04 on dataset-10 (3,928,820 rows): the whole table costs
-# 6.7 GB as Python dicts against 1.3 GB as Arrow, and reading all twenty-three
-# columns to use twelve is most of the difference. On a 32 GB machine that is
-# the reason two background jobs were killed on 2026-09-03.
+# 6.7 GB as Python dicts against 1.3 GB as Arrow, and reading every column to
+# use twelve was most of the difference. On a 32 GB machine that is the reason
+# two background jobs were killed on 2026-09-03.
 #
 # **Listed rather than derived.** A column read through `.get()` somewhere
 # this list forgot would arrive as `None` and be indistinguishable from a
@@ -494,6 +494,29 @@ DATASET_COLUMNS = (
     "tradability_state",
     "limit_up",
     "limit_down",
+    # The three-institution net-buy figures, added 2026-09-05. Every one of
+    # them carries the PREVIOUS session's published report -- both exchanges
+    # publish after the close, so a rank on a session's own figures acted on
+    # at its open is look-ahead. The dataset does not hold the same-session
+    # numbers at all, which is why the name is part of the column and not a
+    # rule a strategy has to remember.
+    #
+    # Loaded whether or not the chosen strategy ranks on them. Measured
+    # 2026-09-05 on split-03's development half (3,076,380 rows): resident
+    # 1.235 GB against 1.504 GB, peak 1.55 GB against 1.93 GB, load 23.3s
+    # against 28.5s.
+    #
+    # The alternative -- filling those four slots only when a strategy asks --
+    # would return less than that 0.269 GB, because the empty slots still cost
+    # about 0.09 GB whatever is in them, and it buys a `Bar` that is sometimes
+    # complete and sometimes not. That is a worse failure than the one the
+    # projection was built to avoid: an unfilled slot raises where a strategy
+    # reads it, which is loud, but "was this run loaded with them?" is a
+    # question no artefact would answer.
+    "foreign_net_prior_session",
+    "investment_trust_net_prior_session",
+    "dealer_net_prior_session",
+    "total_net_prior_session",
 )
 
 
@@ -502,8 +525,8 @@ class Bar:
 
     A `__slots__` object rather than a dict, measured 2026-09-04 over
     3,928,820 rows: **3.37 GB as dicts against 0.59 GB here**, with the value
-    sharing below. A twelve-key dict carries a hash table the driver never
-    uses -- every access is a fixed attribute name known at author time.
+    sharing below. A dict carries a hash table the driver never uses -- every
+    access is a fixed attribute name known at author time.
 
     Attribute access also fails louder. A column the projection forgot arrives
     as `None` through `.get()` and is indistinguishable from a value the

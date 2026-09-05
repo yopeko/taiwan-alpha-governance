@@ -40,6 +40,38 @@ WAREHOUSE_PATH = re.compile(
     r"tw-alpha-m3-(?:staging|pit)[a-z-]*-\d+|tw-alpha-m6-dataset-\d+"
 )
 
+# 2026-09-05: the pattern above was not enough, and its gap was structural.
+#
+# It names `staging` and `pit` under M3 and `dataset` under M6, so the
+# institutional lane -- a fifth root, added that day and declared in
+# `current_build` like every other -- fell outside a rule written to be
+# broader than the roots that happened to exist. `tw-alpha-m7-split-NN` had
+# been outside it since the sealed split was built, and `tw-alpha-m6-report-NN`
+# since the candidate report was pinned.
+#
+# Widening the pattern to `tw-alpha-m\d+-[a-z-]*\d+` was tried and overreaches:
+# it also catches `tw-alpha-m2-shadow-20260803` and the other dated one-off
+# archives, which are immutable artefacts rather than rotating generations and
+# are correctly named by the M2-era scripts that produced them.
+#
+# So the roots are read from the single source instead of described. Declaring
+# a root there now extends this rule by itself, which is the property the
+# pattern was reaching for and could not reach.
+DECLARED_ROOT = re.compile(r'SCRATCH / "([a-z0-9][a-z0-9-]*)"')
+
+
+def declared_roots() -> set[str]:
+    found = set(DECLARED_ROOT.findall(SINGLE_SOURCE.read_text(encoding="utf-8")))
+    assert len(found) >= 5, f"the single source declares only {found}"
+    return found
+
+
+def offending_root(line: str) -> str | None:
+    match = WAREHOUSE_PATH.search(line)
+    if match:
+        return match.group(0)
+    return next((root for root in declared_roots() if root in line), None)
+
 SEARCH_ROOTS = (REPO / "scripts", REPO / "tests", REPO / "m4", REPO / "m5")
 
 
@@ -73,6 +105,29 @@ def test_the_single_source_exists_and_names_the_roots():
         "the single source names no warehouse root, so every other module "
         "would have to invent one"
     )
+    roots = declared_roots()
+    # The two the pattern never covered, which is why the derived set exists.
+    assert any(r.startswith("tw-alpha-m7-split-") for r in roots), roots
+    assert any("institutional" in r for r in roots), roots
+
+
+def test_the_rule_catches_the_roots_the_pattern_missed():
+    """守門自己的守門。
+
+    放寬之後最容易發生的事，是它看起來涵蓋了而實際上沒有——那正是這條規則
+    存在要防的形狀。所以直接拿三個「舊樣式抓不到」的根去問它。
+    """
+
+    for root in (
+        "tw-alpha-m3-institutional-pit-01",
+        "tw-alpha-m7-split-03",
+        "tw-alpha-m6-report-01",
+    ):
+        assert WAREHOUSE_PATH.search(root) is None, f"{root} 舊樣式竟然抓得到"
+        assert offending_root(f'ROOT = Path("C:/tmp/{root}")') == root
+
+    # 而不可變的日期封存不該被掃進來：它們是產物不是輪替世代。
+    assert offending_root('ROOT = "tw-alpha-m2-shadow-20260803"') is None
 
 
 @pytest.mark.parametrize("path", python_files(), ids=lambda p: p.name)
@@ -85,9 +140,9 @@ def test_no_module_hardcodes_a_warehouse_path(path: Path):
         # defect is a module *resolving* one, not a sentence mentioning it.
         if line.lstrip().startswith("#"):
             continue
-        match = WAREHOUSE_PATH.search(line)
-        if match:
-            offenders.append(f"{number}: {match.group(0)}")
+        found = offending_root(line)
+        if found:
+            offenders.append(f"{number}: {found}")
     assert not offenders, (
         f"{path.relative_to(REPO)} names a warehouse directory: {offenders}. "
         "Import it from scripts/m3/current_build.py instead -- a pinned path "

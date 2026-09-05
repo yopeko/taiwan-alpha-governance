@@ -97,6 +97,7 @@
 - [M6 Phase 0：既有 SEPA 回測的誠實成本重算](evidence/m6-phase0-cost-recompute-2026-08-20.md)
 - [M6 Phase 2：凍結研究資料集](evidence/m6-phase2-research-dataset-2026-08-20.md)
 - [M6 Phase 3：帳本驅動的回測](evidence/m6-phase3-ledger-backtest-2026-08-20.md)
+- [法人買賣超接進資料集：落後一個場次是資料的形狀，而既有產物一份都不用重跑](evidence/m6-institutional-into-dataset-2026-09-05.md)
 
 ## M7 巢狀驗證、候選與比較
 
