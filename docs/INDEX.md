@@ -101,6 +101,7 @@
 - [診斷計畫 005：法人買賣超帶不帶排序資訊（預先登錄，未執行）](evidence/m6-diagnostic-plan-005-institutional-rank-quality-2026-09-05.md)
 - [Owner 指定策略落地並執行：週 MACD × 五日量前 30 × 五日法人買超前 30，報酬／停損 2.5](evidence/m6-weekly-macd-screen-2026-09-05.md)
 - [「最大回撤」一直是期末回撤，而 M0 §8.1 的門檻就是一個回撤門檻](evidence/m6-drawdown-was-terminal-not-maximum-2026-09-05.md)
+- [低波動候選重讀：它系統性地挑到會停止交易的股票，報酬 79.4% 是模型估值](evidence/m7-low-volatility-selects-securities-that-stop-trading-2026-09-05.md)
 
 ## M7 巢狀驗證、候選與比較
 
