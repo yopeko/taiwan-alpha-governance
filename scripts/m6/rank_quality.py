@@ -56,9 +56,8 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 from run_ledger_backtest import (  # noqa: E402
-    MOMENTUM_LOOKBACK_SESSIONS,
+    RANKING_HISTORY_SESSIONS,
     RANKINGS,
-    VOLATILITY_LOOKBACK_SESSIONS,
     load_dataset,
 )
 
@@ -152,26 +151,34 @@ def cross_sections(
         )
 
     sessions, by_session = load_dataset(dataset_root)
-    depth = max(MOMENTUM_LOOKBACK_SESSIONS, VOLATILITY_LOOKBACK_SESSIONS) + 2
+    # Deep enough for whichever ranking is being measured, read from the
+    # declaration beside the ranking rather than from the two constants that
+    # happened to be the deepest when this was written. A five-session
+    # cumulative measured against a two-session history returns None on every
+    # security and reports nothing at all.
+    depth = max(RANKING_HISTORY_SESSIONS.values()) + 2
 
-    closes: dict[tuple[str, str], list[float]] = defaultdict(list)
     close_at: dict[tuple[str, str], dict[str, float]] = defaultdict(dict)
     for session in sessions:
         for key, row in by_session[session].items():
             if row.close is not None:
-                closes[key].append(float(row.close))
                 close_at[key][session] = float(row.close)
-                if len(closes[key]) > depth:
-                    closes[key].pop(0)
 
     # Rebuilt rather than carried, so the score at each cross-section is the
     # one the ranking would have produced with that day's history and no more.
     out: list[dict[str, Any]] = []
-    history: dict[tuple[str, str], list[float]] = defaultdict(list)
+    # `Bar` objects, not closes. A ranking that reads the institutional
+    # columns needs the whole row, and building a second parallel list per
+    # column is how the two get one session out of step with each other --
+    # silently, and in the direction that flatters the result.
+    #
+    # Appended only where a close exists, which is what the driver does, so
+    # the history a ranking sees here is the history it would see there.
+    history: dict[tuple[str, str], list[Any]] = defaultdict(list)
     for index, session in enumerate(sessions):
         for key, row in by_session[session].items():
             if row.close is not None:
-                history[key].append(float(row.close))
+                history[key].append(row)
                 if len(history[key]) > depth:
                     history[key].pop(0)
 

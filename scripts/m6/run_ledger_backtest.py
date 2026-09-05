@@ -215,16 +215,14 @@ MOMENTUM_LOOKBACK_SESSIONS = 252
 MOMENTUM_SKIP_SESSIONS = 21
 
 
-def momentum_12_1(
-    closes: list[float], i: int, **_identity: str
-) -> float | None:
+def momentum_12_1(bars: list["Bar"], i: int, **_identity: str) -> float | None:
     """Return from 252 sessions ago to 21 sessions ago. None if too short."""
 
     if i < MOMENTUM_LOOKBACK_SESSIONS:
         return None
-    start = closes[i - MOMENTUM_LOOKBACK_SESSIONS]
-    end = closes[i - MOMENTUM_SKIP_SESSIONS]
-    if start <= 0:
+    start = bars[i - MOMENTUM_LOOKBACK_SESSIONS].close
+    end = bars[i - MOMENTUM_SKIP_SESSIONS].close
+    if start is None or end is None or start <= 0:
         return None
     return end / start - 1
 
@@ -280,7 +278,7 @@ def realised_volatility(closes: list[float], i: int) -> float | None:
 
 
 def inverse_volatility_60(
-    closes: list[float], i: int, **_identity: str
+    bars: list["Bar"], i: int, **_identity: str
 ) -> float | None:
     """Negative realised volatility, so the quietest name scores highest.
 
@@ -288,7 +286,9 @@ def inverse_volatility_60(
     every ranking uses, rather than each ranking carrying its own direction.
     """
 
-    vol = realised_volatility(closes, i)
+    # `stop_distance` shares this helper and works in closes, so the
+    # conversion happens here rather than changing both.
+    vol = realised_volatility([b.close for b in bars], i)
     return None if vol is None else -vol
 
 
@@ -418,7 +418,7 @@ def _random_seeded(seed: int):
     """A ranking that knows nothing about the market."""
 
     def score(
-        closes: list[float],
+        bars: list["Bar"],
         i: int,
         *,
         market: str = "",
@@ -433,13 +433,135 @@ def _random_seeded(seed: int):
     return score
 
 
+# Institutional net buying, from the four lagged columns dataset-11 added.
+# Pre-registered as diagnostic plan 005; the definitions here are the ones
+# written down before anything was measured, and are not to be adjusted after
+# seeing a result.
+#
+# **Every one of these reads a `..._prior_session` column**, which carries the
+# report published after the PREVIOUS session's close. The same-session
+# figures are not in the dataset, so there is no version of these functions
+# that could look ahead -- see `build_research_dataset` for why that is a
+# property of the data rather than a rule kept here.
+#
+# Null is never zero. A null means the exchange did not quote the security
+# that session, so its absence from the report says nothing; scoring it as
+# "no institutional interest" would sort halted and delisted names in among
+# the ones nobody bought.
+INSTITUTIONAL_CUMULATIVE_SESSIONS = 5
+
+
+def _cumulative(bars: list["Bar"], i: int, field: str, sessions: int) -> float | None:
+    """Sum of `field` over the last `sessions` history entries, or None.
+
+    All of them must be present. Summing what is available would put a
+    three-session total and a five-session total in the same cross-section and
+    sort them against each other, which is comparing two different quantities.
+
+    An entry is a session in which the security was quoted -- history is
+    appended only where a close exists, in the driver and in `rank_quality`
+    alike. For a security with a trading halt inside the window this therefore
+    spans more than five calendar sessions, and every value in it is still a
+    published report rather than a filled-in gap.
+    """
+
+    if i + 1 < sessions:
+        return None
+    total = 0.0
+    for bar in bars[i + 1 - sessions : i + 1]:
+        value = getattr(bar, field)
+        if value is None:
+            return None
+        total += float(value)
+    return total
+
+
+def investment_trust_net(bars: list["Bar"], i: int, **_identity: str) -> float | None:
+    """投信買賣超股數, previous session. The literal reading of the screen.
+
+    **Mostly a size proxy, and that is the point of measuring it.** TSMC's
+    投信 figure will out-rank a small cap's on almost any session, so a top-N
+    by this number is largely a list of large caps. Plan 005 measures it
+    alongside `institutional-net-turnover` precisely so a positive result can
+    be attributed to one or the other.
+    """
+
+    value = bars[i].investment_trust_net_prior_session
+    return None if value is None else float(value)
+
+
+def investment_trust_net_5(bars: list["Bar"], i: int, **_identity: str) -> float | None:
+    value = _cumulative(
+        bars, i, "investment_trust_net_prior_session",
+        INSTITUTIONAL_CUMULATIVE_SESSIONS,
+    )
+    return value
+
+
+def foreign_net_5(bars: list["Bar"], i: int, **_identity: str) -> float | None:
+    return _cumulative(
+        bars, i, "foreign_net_prior_session", INSTITUTIONAL_CUMULATIVE_SESSIONS
+    )
+
+
+def institutional_net_turnover(
+    bars: list["Bar"], i: int, **_identity: str
+) -> float | None:
+    """三大法人合計 as a share of the same session's volume.
+
+    Both numbers come from session i-1: the institutional column is already
+    lagged and `volume` is read at the same index, so the ratio is one
+    session's flow against that session's turnover rather than a mix of two.
+
+    Volume of zero returns None, not a very large number. A security that did
+    not trade has no share of anything, and dividing by it invents a rank out
+    of an absence.
+
+    The scope caveat is real and is not corrected here: TPEx institutional
+    figures include block trades, odd lots and omnibus accounts while its
+    volume column excludes odd lots and the after-hours session, so a TPEx
+    ratio can legitimately exceed one. `scope_note` on the M3 table carries
+    which is which, and plan 005 reports the two markets together because
+    splitting them would be a fifth signal nobody pre-registered.
+    """
+
+    net = bars[i].total_net_prior_session
+    volume = bars[i].volume
+    if net is None or not volume:
+        return None
+    return float(net) / float(volume)
+
+
 RANKINGS: dict[str, Any] = {
     "": None,
     "momentum-12-1": momentum_12_1,
     "inverse-volatility-60": inverse_volatility_60,
+    "investment-trust-net": investment_trust_net,
+    "investment-trust-net-5": investment_trust_net_5,
+    "foreign-net-5": foreign_net_5,
+    "institutional-net-turnover": institutional_net_turnover,
     # Twenty, because one draw is a sample and the question is whether a
     # candidate's return sits inside the distribution or outside it.
     **{f"random-seed-{s}": _random_seeded(s) for s in CONTROL_SEEDS},
+}
+
+# How much history each ranking needs, declared beside it.
+#
+# This replaced an `if ranking_name == ... elif ...` chain in the driver.
+# A ranking left out of that chain got the entry rule's depth, which for a
+# five-session cumulative is enough to return `None` on every security --
+# **no error, no score, and a run that quietly ranks nothing**. A test asserts
+# every name here has an entry, so the omission fails at import rather than in
+# a report full of zeroes.
+RANKING_HISTORY_SESSIONS: dict[str, int] = {
+    "": 0,
+    "momentum-12-1": MOMENTUM_LOOKBACK_SESSIONS,
+    "inverse-volatility-60": VOLATILITY_LOOKBACK_SESSIONS,
+    "investment-trust-net": 1,
+    "investment-trust-net-5": INSTITUTIONAL_CUMULATIVE_SESSIONS,
+    "foreign-net-5": INSTITUTIONAL_CUMULATIVE_SESSIONS,
+    "institutional-net-turnover": 1,
+    **{f"random-seed-{s}": 1 for s in CONTROL_SEEDS},
 }
 
 
@@ -625,7 +747,7 @@ def breakout_signals(
                 # missing score must not quietly sort as zero.
                 continue
             score = ranking(
-                closes, len(bars) - 1,
+                bars, len(bars) - 1,
                 market=key[0], symbol=key[1], session=session,
             )
             if score is None:
@@ -693,7 +815,7 @@ def rank_only_signals(
         if any(c is None for c in closes):
             continue
         score = ranking(
-            closes, len(bars) - 1,
+            bars, len(bars) - 1,
             market=key[0], symbol=key[1], session=session,
         )
         if score is None:
@@ -806,11 +928,9 @@ def run(
     # Deep enough for whichever needs more history, the entry rule or the
     # ranking. Trimming to the breakout lookback alone left 22 bars, and a
     # 252-session momentum read against 22 bars scores nothing at all.
-    history_depth = lookback + 2
-    if ranking_name == "momentum-12-1":
-        history_depth = max(history_depth, MOMENTUM_LOOKBACK_SESSIONS + 2)
-    elif ranking_name == "inverse-volatility-60":
-        history_depth = max(history_depth, VOLATILITY_LOOKBACK_SESSIONS + 2)
+    history_depth = max(
+        lookback + 2, RANKING_HISTORY_SESSIONS[ranking_name] + 2
+    )
     # Sessions where a candidate refused for capacity outscored one that was
     # opened. Zero is the claim that fills followed the ranking.
     # What the odd-lot liquidity mode actually did. Counted because the first

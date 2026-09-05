@@ -26,6 +26,8 @@ from pathlib import Path
 
 import pytest
 
+from typing import Any
+
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "scripts" / "m6"))
@@ -142,9 +144,43 @@ class TestTheScoresAreReproducibleByAnyone:
 class TestThePriceRankingsStillTakeTheOldCallForm:
     """`rank_quality.py` calls them positionally with two arguments. The
     identity keywords were added for the control; breaking the other callers
-    to add a control would be a poor trade."""
+    to add a control would be a poor trade.
+
+    **The two arguments are still two, and the first is no longer a list of
+    closes.** On 2026-09-05 it became a list of `Bar`, because the
+    institutional rankings read `..._prior_session` and `volume` and a second
+    parallel list is how two series get one session out of step -- silently,
+    and in the direction that flatters the result.
+
+    The call *form* is what this class guards, and it is intact. That the
+    element type changed is checked here rather than left to the reader,
+    because a test that keeps passing on the old type would be asserting
+    something no caller does any more.
+    """
+
+    def bars(self, closes: list[float]) -> list[Any]:
+        import run_ledger_backtest as backtest
+
+        return [
+            backtest.Bar(
+                tuple(
+                    close if name == "close" else None
+                    for name in backtest.DATASET_COLUMNS
+                )
+            )
+            for close in closes
+        ]
 
     @pytest.mark.parametrize("name", ["momentum-12-1", "inverse-volatility-60"])
     def test_two_positional_arguments_still_work(self, name):
+        history = self.bars([100.0 + i * 0.1 for i in range(300)])
+        assert RANKINGS[name](history, len(history) - 1) is not None
+
+    @pytest.mark.parametrize("name", ["momentum-12-1", "inverse-volatility-60"])
+    def test_a_bare_list_of_floats_no_longer_works(self, name):
+        """守門不是裝飾：舊型別現在必須壞掉。若它還能過，代表某處還在用
+        list[float]，而那一處讀不到法人欄位。"""
+
         closes = [100.0 + i * 0.1 for i in range(300)]
-        assert RANKINGS[name](closes, len(closes) - 1) is not None
+        with pytest.raises(AttributeError):
+            RANKINGS[name](closes, len(closes) - 1)
