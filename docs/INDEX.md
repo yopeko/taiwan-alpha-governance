@@ -46,6 +46,7 @@
 - [制度變更有沒有在窗口裡留下斷點：量了，沒有](evidence/m3-regime-continuity-2026-09-03.md)
 - [歷史來源回到哪一年：TWSE 2004、TPEx 2007](evidence/m3-history-reach-probe-2026-09-03.md)
 - [三大法人買賣超能不能成為一個 lane：可以，但格式變過兩次](evidence/m3-institutional-reach-probe-2026-09-04.md)
+- [三大法人買賣超軌道建成：2,462 萬列，而一份合法 JSON 的空表撐完了整個六年執行](evidence/m3-institutional-lane-2026-09-05.md)
 - [M3.10 減資公告日與停止買賣日](evidence/m3-10-reduction-announcement-linkage-2026-08-19.md)
 - [M3.11 TPEx 公司行動晉升 canonical 表](evidence/m3-11-tpex-actions-promotion-2026-08-19.md)
 - [M3.12 變更股票面額取得官方來源](evidence/m3-12-par-value-change-2026-08-19.md)

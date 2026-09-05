@@ -35,6 +35,36 @@ that reorders the groups would break the arithmetic before it corrupted a
 signal, which is the whole reason to derive structure this way rather than
 hardcode a remembered order.
 
+ABSENCE OF A ROW IS A ZERO, NOT A GAP -- AND JOINING IT WRONG IS SILENT
+
+Neither report lists every traded security. Both publish rows whose net is
+exactly zero (2-8% of rows), so they are not filtered to "only the ones that
+moved"; yet only 0.97 of TWSE's traded ordinary shares and 0.83 of TPEx's
+appear on a median session.
+
+The ones that do not appear are systematically the smallest. Measured:
+
+    2019-01-22 TPEx   present median volume 224,000   absent 20,000
+    2019-11-01 TWSE   present median volume 504,994   absent 29,000
+
+and the largest absent TWSE names that session closed at 0.73, 1.80 and 2.51.
+So **the absence of a row means no institutional order flow that day**, which
+is a fact about the security, not a hole in the capture. The build's
+cross-check against the price warehouse covers the other case: a whole
+market-session that traded and reported nothing.
+
+**Consume this with a left join from the tradable universe and fill the nets
+with zero.** An inner join drops those names, and the dropout is neither
+small nor stable:
+
+    TPEx   36.6% of traded ordinary-share days in 2019 -> 9.2% in 2026
+    TWSE   10.6%                                       -> 1.0%
+
+An inner join therefore silently removes a time-varying, size-correlated
+slice of the universe -- more of it early, more of it small -- which tilts
+any ranking or backtest toward larger names by exactly the amount nobody
+measured. No error is raised either way.
+
 A SCOPE NOTE THAT MATTERS AND IS NOT A DEFECT
 
 TPEx's own subtitle says the figures include 普通股、鉅額、零股、綜合帳戶.
@@ -60,6 +90,7 @@ import pyarrow.parquet as pq
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from build_index_benchmarks import blob_for, observations  # noqa: E402
+from current_build import PRICES  # noqa: E402
 
 SCHEMA_ID = "tw-alpha-m3-institutional/1.0.0"
 
@@ -268,12 +299,71 @@ def tpex_rows(table: dict, session: str, record: dict) -> list[dict[str, Any]]:
     return out
 
 
-def build(archives: list[Path], out_root: Path) -> dict[str, Any]:
+def verify_against_prices(
+    covered: set[tuple[str, str]], prices_root: Path
+) -> dict[str, Any]:
+    """Every market-session that traded must have institutional rows.
+
+    **This is the check that was missing, and its absence cost a session.**
+
+    TPEx answered one request with `{"stat":"ok","date":"114/04/09",...
+    "data":[]}` -- 641 bytes, valid JSON, correct date, no rows. It stored as
+    `hash-verified`/`official-captured`, the capture guard passed it because
+    it starts with `{`, the resume counted the session as held, and the
+    warehouse carried a hole that nothing downstream could tell from a
+    holiday. 846 TPEx securities traded that day and re-asking returned 887
+    rows.
+
+    The guard at capture time now demands rows, which closes the same defect
+    one layer earlier. This one is different and belongs here anyway: only
+    the warehouse knows which days had a session, so only the builder can ask
+    "did this market trade, and did we get the report". A future variant --
+    a truncated table, a market that stops answering, a window extended past
+    what was captured -- fails here loudly instead of arriving as silence.
+
+    An empty answer on a genuine non-trading day stays legal, because that
+    day contributes no traded market-session to compare against.
+    """
+
+    table = pq.read_table(
+        prices_root / "daily_prices_pit.parquet",
+        columns=["market", "session_date", "volume"],
+    )
+    traded = {
+        (m, d)
+        for m, d, v in zip(
+            table.column("market").to_pylist(),
+            table.column("session_date").to_pylist(),
+            table.column("volume").to_pylist(),
+        )
+        if v
+    }
+    missing = sorted(traded - covered)
+    if missing:
+        raise SystemExit(
+            f"{len(missing)} market-sessions traded and have no institutional "
+            f"rows, first {missing[:5]}. A session that traded and reported "
+            f"nothing is a hole, and a hole here reads downstream as an "
+            f"absence of institutional interest"
+        )
+    return {
+        "traded_market_sessions": len(traded),
+        "covered_market_sessions": len(covered),
+        "covered_without_trading": len(covered - traded),
+    }
+
+
+def build(archives: list[Path], out_root: Path, prices_root: Path) -> dict[str, Any]:
     if out_root.exists() and any(out_root.iterdir()):
         raise SystemExit(f"output root must be empty: {out_root}")
 
     rows: list[dict[str, Any]] = []
-    stats = {"observations": 0, "sessions_with_rows": 0, "no_rows": 0}
+    stats = {
+        "observations": 0,
+        "sessions_with_rows": 0,
+        "no_rows": 0,
+        "attempts_not_answers": 0,
+    }
     layouts: dict[str, int] = {}
 
     for archive in archives:
@@ -281,6 +371,24 @@ def build(archives: list[Path], out_root: Path) -> dict[str, Any]:
             raise SystemExit(f"not an archive root: {archive}")
         for _, record in observations(archive, sources=(TWSE_SOURCE, TPEX_SOURCE)):
             stats["observations"] += 1
+            # An attempt is not an answer. A six-year run leaves three kinds
+            # of observation behind and only one of them is the report:
+            #
+            #   hash-verified          the bytes, and they match their hash
+            #   http-error-captured    an error body, captured because the
+            #                          bytes are evidence even when they are
+            #                          not the answer
+            #   transport-failed       nothing arrived; `blob_id` is null and
+            #                          `evidence_state` is `quarantined`
+            #
+            # Measured on this lane: 4,004, 64 and 4. Every session has a
+            # hash-verified observation, so the other two are the retries that
+            # preceded it. Reading them would build an error page into a
+            # signal, and the first build crashed on the null blob rather than
+            # doing so -- loud, but this is the check that belongs here.
+            if record.get("capture_status") != "hash-verified":
+                stats["attempts_not_answers"] += 1
+                continue
             period = str(record.get("logical_period") or "")
             if not period.startswith("session:"):
                 continue
@@ -319,7 +427,11 @@ def build(archives: list[Path], out_root: Path) -> dict[str, Any]:
     pq.write_table(pa.Table.from_pylist(rows, schema=SCHEMA), path)
 
     sessions = sorted({r["session_date"] for r in rows})
+    coverage = verify_against_prices(
+        {(r["market"], r["session_date"]) for r in rows}, prices_root
+    )
     manifest = {
+        "coverage": coverage,
         "schema_id": SCHEMA_ID,
         "built_at": datetime.now(timezone.utc).isoformat(),
         "archives": [str(a) for a in archives],
@@ -340,6 +452,11 @@ def build(archives: list[Path], out_root: Path) -> dict[str, Any]:
             "Ranking on these is only point-in-time if the rank is taken after "
             "the close and acted on the next session: the report is published "
             "after trading ends.",
+            "Absence of a row is a zero, not a gap: neither report lists a "
+            "security that had no institutional order flow, and those are "
+            "systematically the smallest names. Join from the universe and "
+            "fill with zero; an inner join drops 36.6% of TPEx traded "
+            "ordinary-share days in 2019 and 9.2% in 2026.",
         ],
     }
     (out_root / "dataset_manifest.json").write_text(
@@ -355,8 +472,9 @@ def main(argv: list[str] | None = None) -> int:
         "--archive", type=Path, action="append", required=True, dest="archives"
     )
     parser.add_argument("--out-root", type=Path, required=True)
+    parser.add_argument("--prices", type=Path, default=PRICES)
     args = parser.parse_args(argv)
-    manifest = build(args.archives, args.out_root)
+    manifest = build(args.archives, args.out_root, args.prices)
     print(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True))
     return 0
 

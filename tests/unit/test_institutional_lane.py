@@ -196,49 +196,80 @@ class TestTheTwoMarketsAreNotForcedIntoOneShape:
         assert "acted on the next session" in source
 
 
-class TestAnErrorPageIsNotAnAnswer:
-    """實跑八分鐘後才現形的缺陷，而它會讓 lane 留下永久的洞。
+class TestAWellFormedNothingIsNotAnAnswerEither:
+    """同一個缺陷有兩個變種，而第一版守門只擋得住其中一個。
 
     TPEx 偶爾對一個合法請求回 **HTTP 200 加一頁 7,343 位元組的 HTML**——
-    六年執行的前 79 個觀測裡出現兩次，而它們的鄰近場次都正常回應。
+    六年執行的前 79 個觀測裡出現兩次，鄰近場次都正常。那個變種擋住了，因為
+    它的第一個位元組不是 `{`。
 
-    那些位元組被忠實保存、雜湊驗證通過。`hash-verified` 講的是位元組與雜湊
-    相符，**不是位元組說了什麼**。
+    **第二個變種穿過去了，而且撐完了整個六年執行。**
+
+        {"stat":"ok","date":"114/04/09","tables":[{...,"data":[]}]}
+
+    641 位元組、合法 JSON、日期正確、表是空的。那天 TPEx 有 846 檔有量成交，
+    重問交易所回 887 列。它以 `hash-verified` / `official-captured` 入庫，
+    守門放行，續跑算它已持有，倉庫裡多了一個下游分不出是不是假日的洞。
+
+    它不是被任何守門抓到的，是被算術抓到的：2,002 個平日減 1,862 個場次是
+    140 個非交易日，乘二是 280，而建置報了 281 個空的。**差額只有一個，那
+    一個就是它。**
+
+    `hash-verified` 講的是位元組與雜湊相符，不是位元組說了什麼。這個 class
+    存在是為了把那句話釘死在兩個變種上。
     """
 
-    def test_hash_verified_does_not_mean_usable(self, tmp_path):
-        """這條測試的存在就是為了把那句話釘住。"""
-
-        import capture_institutional as capture
-
-        root = tmp_path
-        blob = "ab" + "0" * 62
+    def _blob(self, root, prefix: str, payload: bytes) -> str:
+        blob = prefix + "0" * (64 - len(prefix))
         target = root / "raw_blobs" / "sha256" / blob[:2] / blob
         target.mkdir(parents=True)
-        (target / "payload.bin").write_bytes(b"<!DOCTYPE html><html>error</html>")
-        assert capture.payload_is_json(root, {"blob_id": blob}) is False
+        (target / "payload.bin").write_bytes(payload)
+        return blob
 
-    def test_a_json_payload_is_usable(self, tmp_path):
+    def test_an_html_error_page_is_not_an_answer(self, tmp_path):
         import capture_institutional as capture
 
-        blob = "cd" + "0" * 62
-        target = tmp_path / "raw_blobs" / "sha256" / blob[:2] / blob
-        target.mkdir(parents=True)
-        (target / "payload.bin").write_bytes(b'{"tables":[]}')
-        assert capture.payload_is_json(tmp_path, {"blob_id": blob}) is True
+        blob = self._blob(tmp_path, "ab", b"<!DOCTYPE html><html>error</html>")
+        assert capture.payload_has_rows(tmp_path, {"blob_id": blob}) is False
 
-    def test_a_missing_blob_is_not_usable(self, tmp_path):
+    def test_valid_json_with_an_empty_table_is_not_an_answer(self, tmp_path):
+        """**這是撐完六年執行的那一個。**"""
+
         import capture_institutional as capture
 
-        assert capture.payload_is_json(tmp_path, {"blob_id": "ef" + "0" * 62}) is False
-        assert capture.payload_is_json(tmp_path, {}) is False
+        blob = self._blob(
+            tmp_path,
+            "cd",
+            '{"stat":"ok","date":"114/04/09","tables":[{"data":[]}]}'.encode(),
+        )
+        assert capture.payload_has_rows(tmp_path, {"blob_id": blob}) is False
+
+    def test_a_table_with_rows_is_an_answer(self, tmp_path):
+        import capture_institutional as capture
+
+        blob = self._blob(
+            tmp_path, "de", b'{"tables":[{"data":[["1234","TEST"]]}]}'
+        )
+        assert capture.payload_has_rows(tmp_path, {"blob_id": blob}) is True
+
+    def test_a_missing_blob_is_not_an_answer(self, tmp_path):
+        import capture_institutional as capture
+
+        assert capture.payload_has_rows(tmp_path, {"blob_id": "ef" + "0" * 62}) is False
+        assert capture.payload_has_rows(tmp_path, {}) is False
 
     def test_the_resume_would_have_made_the_hole_permanent(self):
-        """修正前 `already_held` 只看 `capture_status`。那個 HTML 會被算成
-        已持有，續跑永遠跳過那個場次，而下游分不出它與真正的非交易日。"""
+        """`already_held` 若只看 `capture_status`，那兩種回應都會被算成已持有，
+        續跑永遠跳過那個場次，而下游分不出它與真正的非交易日。"""
 
-        assert "if not payload_is_json(store_root, record):" in CAPTURE
+        assert "if not payload_has_rows(store_root, record):" in CAPTURE
         assert "would make the hole permanent" in CAPTURE
+
+    def test_the_cost_of_the_stricter_guard_is_written_down(self):
+        """代價是真正的非交易日每次續跑都會被重問一次。那是六秒，而且**要
+        寫下來**——一個沒有標價的守門，下次有人嫌慢時會被拆掉。"""
+
+        assert "re-asked on" in CAPTURE and "costs six seconds" in CAPTURE
 
     def test_a_non_json_reply_is_retried_rather_than_accepted(self):
         """重試迴圈原本只處理連線例外。一個 200 帶 HTML 不是發行者說「那天
@@ -246,3 +277,95 @@ class TestAnErrorPageIsNotAnAnswer:
 
         assert "if attempt == retry_limit:" in CAPTURE
         assert "Retried, not accepted" in CAPTURE
+
+
+class TestTheBuildAsksTheWarehouseWhichDaysTraded:
+    """擷取端的守門只知道自己拿到什麼，不知道那天該不該有東西。
+
+    只有倉庫知道哪幾天有交易，所以「這個市場那天成交了嗎、我們拿到報表了
+    嗎」這個問題只有建置器問得出來。它在每次建置跑，因為那個空表不是被守門
+    抓到的——是被事後手算抓到的，而手算不會每次都做。
+    """
+
+    def test_a_traded_market_session_with_no_rows_stops_the_build(self, tmp_path):
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        prices = tmp_path / "p"
+        prices.mkdir()
+        pq.write_table(
+            pa.table(
+                {
+                    "market": ["TWSE", "TPEX"],
+                    "session_date": ["2025-04-09", "2025-04-09"],
+                    "volume": [1000, 1000],
+                }
+            ),
+            prices / "daily_prices_pit.parquet",
+        )
+        with pytest.raises(SystemExit) as caught:
+            lane.verify_against_prices({("TWSE", "2025-04-09")}, prices)
+        assert "traded and have no institutional rows" in str(caught.value)
+        assert "('TPEX', '2025-04-09')" in str(caught.value)
+
+    def test_a_day_with_no_traded_volume_needs_no_rows(self, tmp_path):
+        """真正的非交易日仍然合法：那天沒有成交的市場場次可以比對。"""
+
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        prices = tmp_path / "p"
+        prices.mkdir()
+        pq.write_table(
+            pa.table(
+                {
+                    "market": ["TWSE", "TWSE"],
+                    "session_date": ["2025-04-09", "2025-04-10"],
+                    "volume": [1000, 0],
+                }
+            ),
+            prices / "daily_prices_pit.parquet",
+        )
+        coverage = lane.verify_against_prices({("TWSE", "2025-04-09")}, prices)
+        assert coverage["traded_market_sessions"] == 1
+        assert coverage["covered_without_trading"] == 0
+
+    def test_an_attempt_is_not_an_answer(self):
+        """一次六年執行留下三種觀測，只有一種是報表。讀到錯誤頁那一份，會把
+        一頁 HTML 建成一個訊號。"""
+
+        source = (REPO / "scripts" / "m3" / "build_institutional.py").read_text(
+            encoding="utf-8"
+        )
+        assert 'record.get("capture_status") != "hash-verified"' in source
+        assert "An attempt is not an answer" in source
+
+
+class TestAbsenceMeansZeroNotMissing:
+    """這條 lane 最容易被誤用的地方，而誤用不會報錯。
+
+    兩個交易所都會發布 `total_net = 0` 的列（2–8%），所以報表不是「只列有動
+    的」。可是有量普通股只被涵蓋 0.83（TPEx）到 0.97（TWSE）。缺席的那些，
+    成交量中位數比在席的低一個數量級——2019-01-22 TPEx 是 20,000 對 224,000，
+    2019-11-01 TWSE 是 29,000 對 504,994，而 TWSE 缺席者裡量最大的幾檔收在
+    0.73、1.80、2.51 元。
+
+    **所以沒有列的意思是那天沒有法人單，不是資料缺。**
+
+    而缺席率隨年份收斂：TPEx 36.6%（2019）→ 9.2%（2026），TWSE 10.6% → 1.0%。
+    用 inner join 接這張表，會丟掉一批**隨年份變化、且與規模相關**的股票，
+    早年丟得多、小型股丟得多。那個偏誤朝著美化的方向，而且不會有任何錯誤訊息。
+    """
+
+    def test_the_join_rule_is_written_down_next_to_the_data(self):
+        source = (REPO / "scripts" / "m3" / "build_institutional.py").read_text(
+            encoding="utf-8"
+        )
+        assert "absence of a row means no institutional order flow" in source
+        assert "left join" in source
+
+    def test_the_measured_dropout_is_recorded_not_rounded_away(self):
+        evidence = (
+            REPO / "docs" / "evidence" / "m3-institutional-lane-2026-09-05.md"
+        ).read_text(encoding="utf-8")
+        assert "36.6%" in evidence and "9.2%" in evidence

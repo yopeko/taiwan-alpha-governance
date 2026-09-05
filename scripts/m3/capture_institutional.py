@@ -91,12 +91,43 @@ def sessions_between(start: date, end: date) -> list[date]:
     return days
 
 
-def payload_is_json(store_root: Path, record: dict[str, Any]) -> bool:
-    """Did this observation store an answer, or an error page?
+def row_count(payload: Any) -> int:
+    if isinstance(payload, list):
+        return len(payload)
+    if not isinstance(payload, dict):
+        return 0
+    tables = payload.get("tables")
+    if isinstance(tables, list) and tables:
+        data = (tables[0] or {}).get("data")
+        return len(data) if isinstance(data, list) else 0
+    data = payload.get("data") or payload.get("aaData")
+    return len(data) if isinstance(data, list) else 0
 
-    Both are captured faithfully and both are `hash-verified` -- that status
-    is about the bytes matching their hash, not about what the bytes say. A
-    200 carrying TPEx's HTML error page verifies perfectly.
+
+def payload_has_rows(store_root: Path, record: dict[str, Any]) -> bool:
+    """Did this observation store a report, or a well-formed nothing?
+
+    `hash-verified` is about the bytes matching their hash, not about what the
+    bytes say, so a failure that arrives with HTTP 200 verifies perfectly.
+    TPEx produces two such failures and **the first guard here only caught
+    one of them**:
+
+        an HTML error page          caught -- it does not start with `{`
+        `{"stat":"ok","date":       NOT caught -- valid JSON, correct date,
+         "114/04/09","tables":       641 bytes, and an empty table for a
+         [{...,"data":[]}]}`         session on which 846 TPEx securities
+                                     traded and 887 rows exist
+
+    That second one survived the whole six-year run and reached the warehouse.
+    It cost one session out of 1,862, and it was found by arithmetic -- 2,002
+    weekdays less 1,862 sessions is 140 non-trading days, twice 140 is 280,
+    and the build reported 281 empties -- not by anything watching at capture
+    time. Re-asking the exchange returned 887 rows.
+
+    So the guard is now the row count itself: an empty table is only an
+    answer if the day had no session, and that is a fact this lane cannot
+    check. Held means rows arrived. A genuine non-trading day is re-asked on
+    every resume, which costs six seconds and buys the absence of this defect.
     """
 
     blob_id = str(record.get("blob_id") or "")
@@ -104,10 +135,15 @@ def payload_is_json(store_root: Path, record: dict[str, Any]) -> bool:
         return False
     path = store_root / "raw_blobs" / "sha256" / blob_id[:2] / blob_id / "payload.bin"
     try:
-        head = path.read_bytes()[:1]
+        raw = path.read_bytes()
     except OSError:
         return False
-    return head in (b"{", b"[")
+    if raw[:1] not in (b"{", b"["):
+        return False
+    try:
+        return row_count(json.loads(raw.decode("utf-8"))) > 0
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return False
 
 
 def already_held(store_root: Path) -> set[tuple[str, str]]:
@@ -138,23 +174,10 @@ def already_held(store_root: Path) -> set[tuple[str, str]]:
         source, period = record.get("source_id"), str(record.get("logical_period") or "")
         if source not in MARKETS.values() or not period.startswith("session:"):
             continue
-        if not payload_is_json(store_root, record):
+        if not payload_has_rows(store_root, record):
             continue
         held.add((str(source), period))
     return held
-
-
-def row_count(payload: Any) -> int:
-    if isinstance(payload, list):
-        return len(payload)
-    if not isinstance(payload, dict):
-        return 0
-    tables = payload.get("tables")
-    if isinstance(tables, list) and tables:
-        data = (tables[0] or {}).get("data")
-        return len(data) if isinstance(data, list) else 0
-    data = payload.get("data") or payload.get("aaData")
-    return len(data) if isinstance(data, list) else 0
 
 
 def capture_one(

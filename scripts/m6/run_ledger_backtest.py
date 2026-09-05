@@ -79,8 +79,15 @@ TPEX_MARKET = "TPEX"
 # 1.3.0 adds M0 section 9.1's cash, index and equal-weight columns,
 # required by that section since v1.0.0 and carried by no report until
 # 2026-09-04 because nothing computed them.
+#
+# **These two are bumped together or neither is bumped.** On 2026-09-04 the
+# schema went to 1.3.0 and the contract string did not, so every report from
+# that day declares it meets v1.2.0 while carrying all five of v1.3.0's
+# fields -- a reader asking "does this report satisfy the current contract"
+# is told no by a report that does. It survived because the schema id is what
+# the writer thinks about and the contract string is what a consumer reads.
 CANDIDATE_REPORT_SCHEMA = "tw-alpha-m6-candidate-report/1.3.0"
-CANDIDATE_REPORT_CONTRACT = "candidate-report-v1.2.0"
+CANDIDATE_REPORT_CONTRACT = "candidate-report-v1.3.0"
 
 # The median stop distance measured across the SEPA trades in M6 Phase 0.
 # Used only to turn the risk budget into a position size when deriving the
