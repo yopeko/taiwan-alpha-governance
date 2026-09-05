@@ -52,46 +52,43 @@ class TestTheReportCarriesWhatAReconciliationNeeds:
 
 
 class TestAPositionWithNoPriceNeverLeaves:
-    """**這是回測器的缺陷，不是策略的。**
+    """**部位確實不會出場，而那一半是對的。**
 
-    出場迴圈：
+    出場迴圈仍然需要價格——停損讀 `low`、停利讀 `high`、持有上限要一個賣得
+    掉的價。帳戶賣不掉一檔沒有在交易的證券，模型也不該假裝它可以。
 
-        for key in list(positions):
-            row = rows.get(key)
-            if row is None or row.close is None:
-                continue
-
-    停損要 `low`、停利要 `high`、持有上限要一個成交價。沒有價格，三個都
-    不會發生，部位留在帳上直到窗口結束。
+    這個 class 原本釘的是修正前的行為：靜默跳過、以進場價標記。那兩條斷言
+    在同一天被取代，因為**它們釘住的正是要被修的東西**。留下的是不變的那
+    一半，加上指向新行為的斷言。
 
     實測（2026-09-05，週 MACD 篩選、開發側）：2448 於 2020-12-16 進場，
-    2020-12-23 之後 **977 個場次沒有收盤價**，倉庫標為
-    `suspension-inferred-from-price-absence`，而它到 2024-12-31 仍在帳上，
-    **佔期末 NAV 的 10.88%**。
-
-    這一份不修它——改出場語意會讓所有既有產物不可比，而那是 Owner 的決定。
-    它只讓這個行為**不能再是隱含的**。
+    2020-12-23 之後 **977 個場次沒有收盤價**，`membership_state = delisted`，
+    到 2024-12-31 仍在帳上，**佔期末 NAV 的 10.88%**。
     """
 
     def test_the_exit_loop_still_requires_a_price(self):
-        assert "if row is None or row.close is None:\n                continue" in DRIVER
+        """不變的那一半，而且不打算變：偽造成交比留著部位更糟。"""
 
-    def test_the_mark_for_a_held_security_with_no_close(self):
-        """註解說「以前一次的價格」，程式碼用的是**進場價**。
+        assert "if row is None or row.close is None:" in DRIVER
+        assert "cannot sell what is not trading" in DRIVER
 
-        兩者不是同一件事。實測那筆差 −2.56 元（期末 NAV 的 −0.05%），因為
-        進場離停牌只有五個場次——**在別的情形下不會這麼小**。
+    def test_it_is_no_longer_silent(self):
+        """修正前這裡是一個裸的 `continue`，所以一個賣不掉 977 個場次的部位
+        在報告裡只留下 `open_at_end: 1`。"""
+
+        assert '"exit:no-price-cannot-sell-delisted"' in DRIVER
+        assert "position.sessions_without_price += 1" in DRIVER
+
+    def test_the_mark_is_the_last_close_not_the_entry_price(self):
+        """註解一直說「以前一次的價格」，而程式碼一直用**進場價**。
+
+        兩者不是同一件事，而差額不是一次性的：標價經由 NAV 影響風險預算，
+        再影響每一次定量。實測低波動因此差 **2.75 個百分點**。
         """
 
-        assert "marks[position.symbol] = position.entry_price" in DRIVER
+        assert "It was marked at its entry price until 2026-09-05" in DRIVER
         assert "marked at its last one" in DRIVER
-
-    def test_the_listing_tool_says_so_rather_than_printing_a_blank(self):
-        source = (REPO / "scripts" / "m6" / "list_trades.py").read_text(
-            encoding="utf-8"
-        )
-        assert "Not a display problem" in source
-        assert "出場迴圈需要價格，所以它沒有出場" in source
+        assert "position.last_close" in DRIVER
 
 
 class TestTheListingItself:

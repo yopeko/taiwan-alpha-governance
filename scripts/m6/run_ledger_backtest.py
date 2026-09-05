@@ -589,6 +589,14 @@ class OpenPosition:
     # day of entry the high is not yet known when the position opens, and
     # using it would let a stop be set from a price that had not happened.
     peak_high: Decimal = Decimal("0")
+    # The last close observed while this position was held, or None before
+    # the first one. Used to mark a security that has stopped being quoted,
+    # which is what the marking comment always claimed to do.
+    last_close: Decimal | None = None
+    # How many consecutive sessions it has had no price. Reported, because a
+    # position the account cannot sell is not an absence, it is a holding
+    # whose value nobody has quoted.
+    sessions_without_price: int = 0
     # Where a reward-to-risk exit sits, or None when the strategy has none.
     #
     # **Derived from the fill, not from the signal.** The stop comes from the
@@ -622,6 +630,10 @@ DATASET_COLUMNS = (
     "volume",
     "session_state",
     "tradability_state",
+    # Read only to tell a halt from a delisting in the refusal code. The
+    # lifecycle source says which; inferring it from how long the price has
+    # been absent would be guessing at something already recorded.
+    "membership_state",
     "limit_up",
     "limit_down",
     # The three-institution net-buy figures, added 2026-09-05. Every one of
@@ -1160,12 +1172,26 @@ def run(
         }
         held = {p.symbol for p in positions.values()}
         if held - set(marks):
-            # A held security with no close today is marked at its last one;
-            # the ledger refuses to value what it cannot price, and carrying
-            # the previous mark is the conservative reading of a halt.
+            # A held security with no close today is marked at its last one.
+            #
+            # **It was marked at its entry price until 2026-09-05**, which is
+            # not what this comment said and not the same number. Found by
+            # listing the positions still open at the end of a run: one had
+            # been held for 983 sessions, 977 of them with no price at all,
+            # and it was carried at cost the whole way -- 10.88% of that run's
+            # final NAV valued at what it was bought for in 2020.
+            #
+            # `last_close` is the last price the market actually printed while
+            # the account held it. For a halt that is the conservative
+            # reading; for a delisting it is the last observable fact, and no
+            # later one exists inside this warehouse.
             for key, position in positions.items():
                 if position.symbol not in marks:
-                    marks[position.symbol] = position.entry_price
+                    marks[position.symbol] = (
+                        position.last_close
+                        if position.last_close is not None
+                        else position.entry_price
+                    )
         equity.append({"session": session, "nav": float(ledger.mark_session(as_date, marks))})
 
         def conditions(
@@ -1225,8 +1251,28 @@ def run(
             position = positions[key]
             row = rows.get(key)
             if row is None or row.close is None:
+                # **The account cannot sell what is not trading, and that is
+                # correct.** Every exit here needs a price: the stop reads
+                # `low`, the target reads `high`, the holding limit needs
+                # something to sell at. So the position stays.
+                #
+                # What was wrong was that it stayed *silently*. A skipped exit
+                # left no refusal, no counter and no field, so a position that
+                # had been unsellable for 977 sessions appeared in the report
+                # only as `open_at_end: 1`. Faking a fill would be worse --
+                # `MarketConditions` says a caller that has not looked up the
+                # state must say so rather than take a permissive default it
+                # never chose -- so the refusal is recorded instead.
+                position.sessions_without_price += 1
+                refusals[
+                    "exit:no-price-cannot-sell-delisted"
+                    if row is not None and row.membership_state == "delisted"
+                    else "exit:no-price-cannot-sell"
+                ] += 1
                 continue
+            position.sessions_without_price = 0
             close = Decimal(str(row.close))
+            position.last_close = close
             low = Decimal(str(row.low)) if row.low is not None else close
             high = Decimal(str(row.high)) if row.high is not None else close
             opened = Decimal(str(row.open)) if row.open is not None else close
@@ -1638,6 +1684,24 @@ def run(
         # `open_at_end` was a count. A count says one position survived and
         # not which, and its mark-to-market is inside `final_nav` -- so the
         # single largest unexplained number in a losing report was invisible.
+        # How much of the final NAV sits in holdings nobody quoted on the
+        # last session. Reported at the top level because a reader comparing
+        # two returns needs to know that part of one of them has not traded.
+        "nav_in_unquoted_positions": float(
+            sum(
+                (
+                    position.last_close
+                    if position.last_close is not None
+                    else position.entry_price
+                )
+                * position.quantity
+                for key, position in positions.items()
+                if by_session[sessions[-1]].get(key) is None
+                or by_session[sessions[-1]][key].close is None
+            )
+        )
+        if equity
+        else 0.0,
         "open_positions": [
             {
                 "market": position.market,
@@ -1654,6 +1718,17 @@ def run(
                 "holding_sessions": len(sessions)
                 - 1
                 - sessions.index(position.entry_session),
+                "sessions_without_price": position.sessions_without_price,
+                "membership_state": (
+                    None
+                    if by_session[sessions[-1]].get(key) is None
+                    else by_session[sessions[-1]][key].membership_state
+                ),
+                "mark": float(
+                    position.last_close
+                    if position.last_close is not None
+                    else position.entry_price
+                ),
                 "last_close": (
                     None
                     if by_session[sessions[-1]].get(key) is None
@@ -1674,7 +1749,28 @@ def run(
         "completed_trades": len(trades),
         "open_at_end": len(positions),
         "high_water_mark": float(ledger.high_water_mark),
-        "drawdown_pct": float(ledger.drawdown) * 100,
+        # **The largest peak-to-trough fall over the run, not the one at the
+        # end.**
+        #
+        # `ledger.drawdown` is `(high_water - latest) / high_water` -- the
+        # drawdown *right now*. The driver reported it as `drawdown_pct` and
+        # printed it under the heading 最大回撤 from the first version, and
+        # the two coincide only when a run ends at its worst point.
+        #
+        # Measured 2026-09-05 on the same five runs: momentum at the reference
+        # scale reported **0.00%** and its equity curve says **59.27%**,
+        # because it ended at an all-time high. Momentum at the M0 scale
+        # reported 65.93% and the curve agrees, because that one ended at its
+        # low -- which is why this survived every eye that looked at it.
+        #
+        # M0 section 8.1 sets an 8% hard stop **on drawdown**, so the figure
+        # every candidate has been held against was the wrong one wherever a
+        # run did not finish at its trough.
+        #
+        # Both are reported. The terminal figure is a real number about a real
+        # account, it is simply not the one 最大回撤 names.
+        "drawdown_pct": max_drawdown_pct(equity),
+        "terminal_drawdown_pct": float(ledger.drawdown) * 100,
         "realised_pnl": float(ledger.realised_pnl),
         "journal_entries": len(ledger.journal),
         "refusals": dict(sorted(refusals.items(), key=lambda kv: -kv[1])),
@@ -1709,6 +1805,24 @@ def reference_scale_nav() -> Decimal:
             high = mid
     position_share = POLICY_PLANNED_RISK / MEDIAN_STOP_DISTANCE
     return (Decimal(low) / position_share).quantize(Decimal("1"))
+
+
+def max_drawdown_pct(equity: list[dict[str, Any]]) -> float:
+    """The deepest fall from any running peak, as a percentage.
+
+    From the NAV series the run already records, so an artefact produced
+    before this existed can be corrected without being re-run -- the series is
+    in every report.
+    """
+
+    peak = None
+    worst = 0.0
+    for point in equity:
+        nav = float(point["nav"])
+        peak = nav if peak is None else max(peak, nav)
+        if peak > 0:
+            worst = max(worst, (peak - nav) / peak)
+    return worst * 100
 
 
 def realised_costs(result: dict[str, Any]) -> tuple[Decimal, Decimal]:
