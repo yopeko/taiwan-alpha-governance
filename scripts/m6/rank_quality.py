@@ -191,11 +191,35 @@ def cross_sections(
 
         scores: list[float] = []
         forwards: list[float] = []
+        keys: list[tuple[str, str]] = []
+        # How many of the securities on the board this ranking could not score.
+        # Diagnostic plan 005 requires it: a signal that cannot score half the
+        # pool has its IC measured on a filtered universe, and the filter is
+        # the signal's own -- which is a property of the signal, not noise.
+        eligible = unscored = 0
         for key, bars in history.items():
             if key not in by_session[session]:
                 continue
-            score = ranking(bars, len(bars) - 1)
+            eligible += 1
+            # **With the identity, which this call omitted until 2026-09-05.**
+            #
+            # The driver passes `market`, `symbol` and `session`; this did not,
+            # so every ranking that reads them saw the empty string. The
+            # twenty random controls score by `sha256(seed:market:symbol:
+            # session)`, so all twenty gave **the same score to every security
+            # in every cross-section** -- zero variance, a Spearman of None,
+            # and a top-10 that was 14 distinct names across 68 sessions
+            # instead of several hundred.
+            #
+            # The controls were therefore not controls here. `momentum-12-1`
+            # and `inverse-volatility-60` read only prices and are unaffected,
+            # which is why rank-quality 001 was right and this went unseen.
+            score = ranking(
+                bars, len(bars) - 1,
+                market=key[0], symbol=key[1], session=session,
+            )
             if score is None:
+                unscored += 1
                 continue
             now = close_at[key].get(session)
             later = close_at[key].get(forward_session)
@@ -203,21 +227,98 @@ def cross_sections(
                 continue
             scores.append(score)
             forwards.append(later / now - 1)
+            keys.append(key)
 
         if len(scores) < QUINTILES * 2:
             continue
+        top = sorted(range(len(scores)), key=lambda i: -scores[i])[:DEFAULT_TOP_N]
         out.append(
             {
                 "session": session,
                 "forward_session": forward_session,
                 "securities": len(scores),
+                "eligible": eligible,
+                "unscored": unscored,
                 "rank_ic": spearman(scores, forwards),
                 "ndcg": ndcg_at(scores, forwards, DEFAULT_TOP_N),
                 "scores": scores,
                 "forwards": forwards,
+                # The names this ranking would actually have acted on.
+                "top_keys": [keys[i] for i in top],
             }
         )
     return out
+
+
+def ends_delisted(dataset_root: Path) -> set[tuple[str, str]]:
+    """Securities the lifecycle source calls delisted on the window's last session.
+
+    Read from the dataset rather than inferred from how long a price has been
+    absent: `membership_state` records it, and guessing at something already
+    recorded is how the halt/delist distinction got blurred in the first place.
+    """
+
+    table = pq.read_table(
+        dataset_root / "research_dataset.parquet",
+        columns=["market", "symbol", "session_date", "membership_state"],
+    )
+    sessions = table.column("session_date").to_pylist()
+    last = max(sessions)
+    return {
+        (m, s)
+        for m, s, sd, ms in zip(
+            table.column("market").to_pylist(),
+            table.column("symbol").to_pylist(),
+            sessions,
+            table.column("membership_state").to_pylist(),
+        )
+        if sd == last and ms == "delisted"
+    }
+
+
+def delisting_rate(
+    sections: list[dict[str, Any]], ends_delisted: set[tuple[str, str]]
+) -> dict[str, Any]:
+    """How often the top N is a security that stops trading before the window ends.
+
+    Added 2026-09-05, after `inverse-volatility-60` was measured entering 76
+    securities of which **15.8% ended delisted**, against a random median of
+    2.0% and above all twenty controls. The mechanism is mechanical: realised
+    volatility falls when a security trades thinly, and a security often trades
+    thinly before it is suspended.
+
+    **A ranking can have a real IC and still be unusable**, because a position
+    in a security that stops trading can never be closed and permanently
+    consumes a slot. The IC does not see this at all: a security with no
+    forward return is simply absent from the cross-section. So the two numbers
+    are reported side by side rather than one standing for the other.
+
+    The base rate is the same measurement over every security that was scored,
+    which is the honest comparison -- a ranking cannot be blamed for a pool
+    that is full of them.
+    """
+
+    picked = 0
+    picked_delisted = 0
+    pool: set[tuple[str, str]] = set()
+    for section in sections:
+        for key in section["top_keys"]:
+            picked += 1
+            if key in ends_delisted:
+                picked_delisted += 1
+        pool.update(section["top_keys"])
+    scored_pool: set[tuple[str, str]] = set()
+    for section in sections:
+        scored_pool.update(section["top_keys"])
+    return {
+        "top_n_slots_measured": picked,
+        "top_n_delisted_share_pct": (picked_delisted / picked * 100) if picked else None,
+        "distinct_names_in_top_n": len(pool),
+        "distinct_delisted_in_top_n": len(pool & ends_delisted),
+        "distinct_delisted_share_pct": (
+            len(pool & ends_delisted) / len(pool) * 100 if pool else None
+        ),
+    }
 
 
 def quintile_returns(sections: list[dict[str, Any]]) -> list[float | None]:
@@ -344,6 +445,12 @@ def main(argv: list[str] | None = None) -> int:
         )
     report = summarise(sections, args.ranking)
 
+    # Diagnostic plan 005's two added reporting items.
+    eligible = sum(s["eligible"] for s in sections)
+    unscored = sum(s["unscored"] for s in sections)
+    report["unscored_share_pct"] = unscored / eligible * 100 if eligible else None
+    report["delisting"] = delisting_rate(sections, ends_delisted(args.dataset))
+
     print(f"排序函式 {report['ranking_function']}")
     print(f"  截面數        {report['cross_sections']}")
     ic = report["mean_rank_ic"]
@@ -356,6 +463,14 @@ def main(argv: list[str] | None = None) -> int:
     for i, value in enumerate(report["quintile_mean_forward_return"]):
         print(f"     Q{i + 1}  {value:+.4%}" if value is not None else f"     Q{i + 1}  n/a")
     print(f"  單調 {report['quintile_monotone']}")
+    share = report["unscored_share_pct"]
+    print(f"  因 null 未計分  {share:.1f}%" if share is not None else "  因 null 未計分  n/a")
+    d = report["delisting"]
+    if d["top_n_delisted_share_pct"] is not None:
+        print(
+            f"  前 10 名裡後來下市的  {d['top_n_delisted_share_pct']:.2f}%"
+            f"（{d['distinct_delisted_in_top_n']}/{d['distinct_names_in_top_n']} 檔不重複）"
+        )
 
     st = report.get("stability") or {}
     if st:

@@ -68,10 +68,15 @@ class TestTheFourAreTheFourThatWerePreRegistered:
     def test_the_plan_names_it(self, name):
         assert f"`{name}`" in PLAN
 
-    def test_the_plan_is_still_marked_unexecuted_or_has_a_result(self):
-        """計畫若已執行，這條要跟著改——而改它的人會看到這句話。"""
+    def test_the_plan_points_at_its_result_and_was_not_edited_after(self):
+        """計畫在 2026-09-05 執行完畢。**計畫本身不因結果修改**——只在狀態列
+        指向結果文件，而四條訊號的定義、四個預期與那條判定原封不動。
+
+        一份會被結果改寫的預先登錄，就不是預先登錄。"""
 
         assert "預先登錄" in PLAN
+        assert "m6-diagnostic-005-result" in PLAN
+        assert "本文件不因結果修改" in PLAN
 
 
 class TestEveryOneReadsTheLaggedColumn:
@@ -218,3 +223,44 @@ class TestTheSignatureChangeKeptTheOldRankingsIntact:
         a = one([bar(close=1.0)], 0, market="TWSE", symbol="2330", session="d")
         b = one([bar(close=999.0)], 0, market="TWSE", symbol="2330", session="d")
         assert a == b, "隨機對照不該看價格"
+
+
+class TestTheResultIsRecordedAsMeasured:
+    """判定寫在執行之前，而它落在了「結案」那一邊。
+
+    四條訊號的最大 |t| 是 1.67，而一個隨機種子是 +1.57。依計畫 §4，
+    **不會有以法人買賣超為排序函式的候選被登記**。
+    """
+
+    RESULT = (
+        REPO / "docs" / "evidence"
+        / "m6-diagnostic-005-result-institutional-rank-quality-2026-09-05.md"
+    ).read_text(encoding="utf-8")
+
+    def test_the_verdict_is_stated(self):
+        assert "本方向結案" in self.RESULT
+
+    def test_the_falsified_expectation_is_named_as_falsified(self):
+        """預期 2 被否證的方式正好是計畫寫下的那個否證條件。把它寫成
+        「結果不如預期」而不是「預期被否證」，是把一次否證變成一句感想。"""
+
+        assert "**否證**" in self.RESULT
+        assert "它反而最小" in self.RESULT
+
+    def test_the_extra_trials_are_owned_rather_than_omitted(self):
+        """計畫預估 4 筆，實際 9 筆——修掉對照缺陷之後對照組必須重量，
+        而重量是執行。多出來的 5 筆記在結果裡。"""
+
+        assert "245" in self.RESULT
+        assert "而不是被略過" in self.RESULT
+
+    def test_the_control_defect_is_recorded(self):
+        """二十個隨機對照在 `rank_quality` 裡從來不是對照：它沒有傳身分
+        關鍵字，所以每一檔都拿到同一個分數。"""
+
+        assert "從來不是對照" in self.RESULT
+        source = (REPO / "scripts" / "m6" / "rank_quality.py").read_text(
+            encoding="utf-8"
+        )
+        assert "market=key[0], symbol=key[1], session=session," in source
+        assert "which this call omitted until 2026-09-05" in source

@@ -516,10 +516,32 @@ class TestTheReportCarriesTheMinimumComparisonSet:
             assert f'"{name}"' in self.DRIVER, name
 
     def test_the_schema_version_moved(self):
-        """A report that gained required columns is not the same schema."""
+        """A report that gained required columns is not the same schema.
 
-        assert 'CANDIDATE_REPORT_SCHEMA = "tw-alpha-m6-candidate-report/1.3.0"' in self.DRIVER
-        assert "candidate-report-v1.3.0" in self.CONTRACT
+        Pinned at 1.3.0 when the M0 section 9.1 benchmark columns landed, and
+        moved to 1.4.0 on 2026-09-05 when `drawdown_pct` was named as the
+        maximum over the equity curve and `terminal_drawdown_pct` joined it.
+
+        **The two versions move together.** The producer's `schema_id` and
+        `CANDIDATE_REPORT_CONTRACT` were out of step for a day in September
+        because only the first was bumped, and every report from that day
+        declared a version lower than the one it met.
+        """
+
+        assert (
+            'CANDIDATE_REPORT_SCHEMA = "tw-alpha-m6-candidate-report/1.4.0"'
+            in self.DRIVER
+        )
+        assert 'CANDIDATE_REPORT_CONTRACT = "candidate-report-v1.4.0"' in self.DRIVER
+        assert "candidate-report-v1.4.0" in self.CONTRACT
+
+    def test_the_contract_says_which_drawdown(self):
+        """自 v1.0.0 起契約要求 `drawdown_pct` 並稱它「最大回撤」，而沒有說是
+        相對哪個基準、在哪個時點量的。倉庫因此有一天同時存在兩個定義。"""
+
+        assert "權益曲線的最大回撤" in self.CONTRACT
+        assert "terminal_drawdown_pct" in self.CONTRACT
+        assert "final_drawdown_pct_from_run" in self.CONTRACT
 
     def test_every_benchmark_column_says_it_is_gross(self):
         """The candidate's `return_pct` is net. Putting the two side by side
