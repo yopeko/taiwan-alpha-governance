@@ -158,9 +158,9 @@ def cross_sections(
     close_at: dict[tuple[str, str], dict[str, float]] = defaultdict(dict)
     for session in sessions:
         for key, row in by_session[session].items():
-            if row["close"] is not None:
-                closes[key].append(float(row["close"]))
-                close_at[key][session] = float(row["close"])
+            if row.close is not None:
+                closes[key].append(float(row.close))
+                close_at[key][session] = float(row.close)
                 if len(closes[key]) > depth:
                     closes[key].pop(0)
 
@@ -170,8 +170,8 @@ def cross_sections(
     history: dict[tuple[str, str], list[float]] = defaultdict(list)
     for index, session in enumerate(sessions):
         for key, row in by_session[session].items():
-            if row["close"] is not None:
-                history[key].append(float(row["close"]))
+            if row.close is not None:
+                history[key].append(float(row.close))
                 if len(history[key]) > depth:
                     history[key].pop(0)
 

@@ -98,6 +98,7 @@
 - [M6 Phase 2：凍結研究資料集](evidence/m6-phase2-research-dataset-2026-08-20.md)
 - [M6 Phase 3：帳本驅動的回測](evidence/m6-phase3-ledger-backtest-2026-08-20.md)
 - [法人買賣超接進資料集：落後一個場次是資料的形狀，而既有產物一份都不用重跑](evidence/m6-institutional-into-dataset-2026-09-05.md)
+- [診斷計畫 005：法人買賣超帶不帶排序資訊（預先登錄，未執行）](evidence/m6-diagnostic-plan-005-institutional-rank-quality-2026-09-05.md)
 
 ## M7 巢狀驗證、候選與比較
 

@@ -17,6 +17,8 @@ import re
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "scripts" / "m6"))
@@ -130,7 +132,32 @@ def test_the_schema_scan_found_the_real_schema():
     } <= schema
 
 
-def test_no_dataset_column_is_read_by_subscript_anywhere():
+def consumers_of_load_dataset() -> list[Path]:
+    """Every module that gets `Bar` objects, not just the one that makes them.
+
+    `load_dataset` returns them; anything importing it holds them. The scan
+    below was written on 2026-09-04 against the driver alone, and
+    `rank_quality.py` -- the only other consumer -- kept reading `row["close"]`
+    for a day with every test green, because nothing looked at it.
+
+    Derived rather than listed, so a third consumer is covered on the day it
+    is written.
+    """
+
+    found = [
+        path
+        for path in sorted((REPO / "scripts").rglob("*.py"))
+        if "__pycache__" not in path.parts
+        and "load_dataset" in path.read_text(encoding="utf-8")
+    ]
+    assert len(found) >= 2, f"only {found} consume the dataset; the scan proves little"
+    return found
+
+
+@pytest.mark.parametrize(
+    "path", consumers_of_load_dataset(), ids=lambda p: p.name
+)
+def test_no_dataset_column_is_read_by_subscript_anywhere(path: Path):
     """The check the variable-name scan could not make.
 
     `rows[(s.market, s.symbol)]["tradability_state"]` is a dataset row reached
@@ -138,16 +165,19 @@ def test_no_dataset_column_is_read_by_subscript_anywhere():
     of those survived the conversion and the run raised
     `TypeError: 'Bar' object is not subscriptable` four minutes in.
 
-    Loud is better than silent, but this is better than loud.
+    Loud is better than silent, but this is better than loud -- and **only if
+    it looks at every module that holds one**. Restricted to the driver, this
+    passed while `rank_quality.py` was dead on its first line of real work.
     """
 
+    source = path.read_text(encoding="utf-8")
     offenders = sorted(
-        (set(ANY_SUBSCRIPT.findall(SOURCE)) & dataset_schema())
+        (set(ANY_SUBSCRIPT.findall(source)) & dataset_schema())
         - OUTPUT_FIELDS_SHARING_A_COLUMN_NAME
     )
     assert not offenders, (
-        f"read by subscript: {offenders}. Dataset rows are `Bar` objects with "
-        f"`__slots__` -- use attribute access, or add the name to "
+        f"{path.name} reads by subscript: {offenders}. Dataset rows are `Bar` "
+        f"objects with `__slots__` -- use attribute access, or add the name to "
         f"OUTPUT_FIELDS_SHARING_A_COLUMN_NAME if it is an output field that "
         f"happens to share a column name"
     )
